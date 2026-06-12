@@ -1,8 +1,15 @@
-import { useState } from 'react';
-import { Copy, GitBranch, Bug, Shield, TestTube, ChevronDown } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Copy, GitBranch, Bug, Shield, TestTube, ChevronDown, Terminal, ArrowLeft } from 'lucide-react';
 import { AreaChart, ResponsiveContainer, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { useStore } from '@/store/useStore';
-import type { ScanResults } from '@/types';
+import type { ScanResults, IssueCategory } from '@/types';
+
+interface ScanResultsPanelProps {
+  selectedProjectId: string;
+  onSelectProject: (id: string) => void;
+  onGoToConsole?: () => void;
+}
 
 interface MetricConfig {
   key: keyof ScanResults;
@@ -12,23 +19,15 @@ interface MetricConfig {
   maxVal: number;
   invert: boolean;
   color: string;
+  category: IssueCategory;
 }
 
 const METRICS: MetricConfig[] = [
-  { key: 'duplicateCodeRate', label: '重复代码率', unit: '%', icon: Copy, maxVal: 25, invert: true, color: '#F59E0B' },
-  { key: 'cyclomaticComplexity', label: '圈复杂度', unit: '', icon: GitBranch, maxVal: 40, invert: true, color: '#8B5CF6' },
-  { key: 'defectRiskCount', label: '缺陷风险数', unit: '个', icon: Bug, maxVal: 25, invert: true, color: '#EF4444' },
-  { key: 'dependencyVulnerabilities', label: '依赖漏洞数', unit: '个', icon: Shield, maxVal: 20, invert: true, color: '#F97316' },
-  { key: 'testCoverage', label: '测试覆盖率', unit: '%', icon: TestTube, maxVal: 100, invert: false, color: '#06D6A0' },
-];
-
-const TREND_DATA = [
-  { date: '05-19', duplicateCodeRate: 8.5, cyclomaticComplexity: 18, defectRiskCount: 9, dependencyVulnerabilities: 6, testCoverage: 68 },
-  { date: '05-25', duplicateCodeRate: 7.2, cyclomaticComplexity: 16, defectRiskCount: 7, dependencyVulnerabilities: 5, testCoverage: 72 },
-  { date: '05-31', duplicateCodeRate: 6.8, cyclomaticComplexity: 15, defectRiskCount: 6, dependencyVulnerabilities: 4, testCoverage: 75 },
-  { date: '06-06', duplicateCodeRate: 5.5, cyclomaticComplexity: 14, defectRiskCount: 5, dependencyVulnerabilities: 3, testCoverage: 79 },
-  { date: '06-12', duplicateCodeRate: 5.1, cyclomaticComplexity: 13, defectRiskCount: 4, dependencyVulnerabilities: 3, testCoverage: 82 },
-  { date: '06-13', duplicateCodeRate: 4.2, cyclomaticComplexity: 12, defectRiskCount: 3, dependencyVulnerabilities: 2, testCoverage: 85 },
+  { key: 'duplicateCodeRate', label: '重复代码率', unit: '%', icon: Copy, maxVal: 25, invert: true, color: '#F59E0B', category: 'duplicate' },
+  { key: 'cyclomaticComplexity', label: '圈复杂度', unit: '', icon: GitBranch, maxVal: 40, invert: true, color: '#8B5CF6', category: 'complexity' },
+  { key: 'defectRiskCount', label: '缺陷风险数', unit: '个', icon: Bug, maxVal: 25, invert: true, color: '#EF4444', category: 'defect' },
+  { key: 'dependencyVulnerabilities', label: '依赖漏洞数', unit: '个', icon: Shield, maxVal: 20, invert: true, color: '#F97316', category: 'vulnerability' },
+  { key: 'testCoverage', label: '测试覆盖率', unit: '%', icon: TestTube, maxVal: 100, invert: false, color: '#06D6A0', category: 'coverage' },
 ];
 
 function MetricRing({ value, maxVal, invert, color, size = 72 }: { value: number; maxVal: number; invert: boolean; color: string; size?: number }) {
@@ -47,30 +46,70 @@ function MetricRing({ value, maxVal, invert, color, size = 72 }: { value: number
         cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color}
         strokeWidth={strokeWidth} strokeDasharray={circumference}
         strokeDashoffset={offset} strokeLinecap="round"
-        style={{ filter: `drop-shadow(0 0 4px ${color}40)` }}
+        style={{ filter: `drop-shadow(0 0 4px ${color}40)`, transition: 'stroke-dashoffset 0.6s ease-out' }}
       />
     </svg>
   );
 }
 
-export default function ScanResultsPanel() {
-  const { projects, scanRecords } = useStore();
-  const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? '');
+export default function ScanResultsPanel({ selectedProjectId, onSelectProject, onGoToConsole }: ScanResultsPanelProps) {
+  const { projects, scanRecords, getOrCreateRuleConfig } = useStore();
+  const navigate = useNavigate();
 
-  const latestRecord = scanRecords
-    .filter((r) => r.projectId === selectedProjectId && r.status === 'completed' && r.results)
-    .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+  const selectedProject = projects.find((p) => p.id === selectedProjectId);
+  const ruleConfig = getOrCreateRuleConfig(selectedProjectId);
 
+  const projectCompletedRecords = useMemo(() =>
+    scanRecords
+      .filter((r) => r.projectId === selectedProjectId && r.status === 'completed' && r.results)
+      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()),
+    [scanRecords, selectedProjectId]
+  );
+
+  const latestRecord = projectCompletedRecords[projectCompletedRecords.length - 1];
   const results = latestRecord?.results ?? null;
+
+  const trendData = useMemo(() =>
+    projectCompletedRecords.slice(-10).map((r, i) => ({
+      date: new Date(r.startTime).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
+      duplicateCodeRate: r.results?.duplicateCodeRate ?? 0,
+      cyclomaticComplexity: r.results?.cyclomaticComplexity ?? 0,
+      defectRiskCount: r.results?.defectRiskCount ?? 0,
+      dependencyVulnerabilities: r.results?.dependencyVulnerabilities ?? 0,
+      testCoverage: r.results?.testCoverage ?? 0,
+    })),
+    [projectCompletedRecords]
+  );
+
+  const isExceeding = (metric: MetricConfig): boolean => {
+    if (!results) return false;
+    const check = ruleConfig.checks.find((c) => c.category === metric.category);
+    if (!check?.enabled) return false;
+    const val = results[metric.key];
+    if (metric.key === 'testCoverage') return val < check.threshold;
+    return val > check.threshold;
+  };
+
+  const goToIssues = (category: string) => {
+    navigate(`/issues?project=${selectedProjectId}&category=${category}`);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="font-display text-lg font-semibold text-surface-100">扫描结果仪表盘</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="font-display text-lg font-semibold text-surface-100">扫描结果仪表盘</h2>
+          {onGoToConsole && (
+            <button onClick={onGoToConsole} className="text-xs text-surface-500 hover:text-brand-400 flex items-center gap-1 transition-colors">
+              <ArrowLeft className="w-3 h-3" />
+              返回控制台
+            </button>
+          )}
+        </div>
         <div className="relative">
           <select
             value={selectedProjectId}
-            onChange={(e) => setSelectedProjectId(e.target.value)}
+            onChange={(e) => onSelectProject(e.target.value)}
             className="appearance-none bg-surface-800 border border-surface-700/50 rounded-lg px-4 py-2 pr-8 text-sm text-surface-200 focus:outline-none focus:border-brand-500/50 cursor-pointer"
           >
             {projects.map((p) => (
@@ -82,8 +121,15 @@ export default function ScanResultsPanel() {
       </div>
 
       {!results ? (
-        <div className="card-glow rounded-xl p-12 text-center">
-          <p className="text-surface-500 text-sm">暂无扫描结果，请先触发扫描</p>
+        <div className="card-glow rounded-xl p-12 text-center space-y-4">
+          <TestTube className="w-12 h-12 text-surface-600 mx-auto" />
+          <p className="text-surface-500 text-sm">暂无扫描结果</p>
+          {onGoToConsole && (
+            <button onClick={onGoToConsole} className="btn-primary inline-flex items-center gap-2 text-sm">
+              <Terminal className="w-4 h-4" />
+              前往控制台发起扫描
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -91,31 +137,47 @@ export default function ScanResultsPanel() {
             {METRICS.map((metric) => {
               const val = results[metric.key];
               const Icon = metric.icon;
+              const exceeding = isExceeding(metric);
               return (
-                <div key={metric.key} className="card-glow rounded-xl p-4 flex flex-col items-center">
+                <div
+                  key={metric.key}
+                  className={`card-glow rounded-xl p-4 flex flex-col items-center cursor-pointer transition-all ${
+                    exceeding ? 'border-red-500/30' : ''
+                  }`}
+                  onClick={() => goToIssues(metric.category)}
+                >
                   <div className="flex items-center gap-1.5 mb-3">
-                    <Icon className="w-3.5 h-3.5" style={{ color: metric.color }} />
+                    <Icon className="w-3.5 h-3.5" style={{ color: exceeding ? '#EF4444' : metric.color }} />
                     <span className="text-xs text-surface-400">{metric.label}</span>
                   </div>
                   <div className="relative">
-                    <MetricRing value={val} maxVal={metric.maxVal} invert={metric.invert} color={metric.color} />
+                    <MetricRing value={val} maxVal={metric.maxVal} invert={metric.invert} color={exceeding ? '#EF4444' : metric.color} />
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="stat-number text-base" style={{ color: metric.color }}>
+                      <span className="stat-number text-base" style={{ color: exceeding ? '#EF4444' : metric.color }}>
                         {typeof val === 'number' && val % 1 !== 0 ? val.toFixed(1) : val}
                       </span>
                     </div>
                   </div>
                   <span className="text-xs text-surface-500 mt-2">{metric.unit}</span>
+                  {exceeding && (
+                    <span className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+                      <Shield className="w-2.5 h-2.5" />
+                      超出阈值
+                    </span>
+                  )}
                 </div>
               );
             })}
           </div>
 
           <div className="card-glow rounded-xl p-5">
-            <h3 className="font-display text-sm font-semibold text-surface-200 mb-4">指标趋势</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display text-sm font-semibold text-surface-200">指标趋势</h3>
+              <span className="text-xs text-surface-500">共 {trendData.length} 次扫描</span>
+            </div>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={TREND_DATA} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <AreaChart data={trendData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <defs>
                     {METRICS.map((m) => (
                       <linearGradient key={m.key} id={`grad-${m.key}`} x1="0" y1="0" x2="0" y2="1">

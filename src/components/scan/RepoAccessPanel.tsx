@@ -1,6 +1,10 @@
 import { useState } from 'react';
-import { GitBranch, Link2, Lock, Plus, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { GitBranch, Link2, Lock, Plus, Wifi, WifiOff, Loader2, ArrowRight } from 'lucide-react';
 import { useStore } from '@/store/useStore';
+
+interface RepoAccessPanelProps {
+  onGoToConsole?: (projectId?: string) => void;
+}
 
 const STATUS_MAP = {
   connected: { label: '已连接', icon: Wifi, color: 'text-brand-400' },
@@ -8,7 +12,7 @@ const STATUS_MAP = {
   scanning: { label: '扫描中', icon: Loader2, color: 'text-amber-400' },
 } as const;
 
-export default function RepoAccessPanel() {
+export default function RepoAccessPanel({ onGoToConsole }: RepoAccessPanelProps) {
   const { projects, addProject } = useStore();
   const [repoUrl, setRepoUrl] = useState('');
   const [branch, setBranch] = useState('main');
@@ -18,6 +22,7 @@ export default function RepoAccessPanel() {
 
   const handleAdd = () => {
     if (!repoUrl.trim() || !repoName.trim()) return;
+    const newProjectId = `p${Date.now()}`;
     addProject({
       name: repoName.trim(),
       repoUrl: repoUrl.trim(),
@@ -101,7 +106,7 @@ export default function RepoAccessPanel() {
             const statusInfo = STATUS_MAP[project.status];
             const StatusIcon = statusInfo.icon;
             return (
-              <div key={project.id} className="card-glow rounded-xl p-4 flex items-start gap-4">
+              <div key={project.id} className="card-glow rounded-xl p-4 flex items-start gap-4 group">
                 <div className={`mt-0.5 p-2 rounded-lg ${project.status === 'connected' ? 'bg-brand-500/10' : project.status === 'scanning' ? 'bg-amber-500/10' : 'bg-surface-700/30'}`}>
                   <GitBranch className={`w-4 h-4 ${statusInfo.color}`} />
                 </div>
@@ -113,7 +118,7 @@ export default function RepoAccessPanel() {
                       {statusInfo.label}
                     </span>
                   </div>
-                  <p className="text-xs text-surface-500 mt-1 truncate">{project.repoUrl}</p>
+                  <p className="text-xs text-surface-500 mt-1 truncate font-mono">{project.repoUrl}</p>
                   <div className="flex items-center gap-3 mt-2 text-xs text-surface-400">
                     <span className="flex items-center gap-1"><GitBranch className="w-3 h-3" />{project.branch}</span>
                     {project.lastScanTime && (
@@ -121,6 +126,15 @@ export default function RepoAccessPanel() {
                     )}
                   </div>
                 </div>
+                {onGoToConsole && (
+                  <button
+                    onClick={() => onGoToConsole(project.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300"
+                  >
+                    控制台
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             );
           })}

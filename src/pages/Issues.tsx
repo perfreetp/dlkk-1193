@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Filter, Search, ChevronLeft, ChevronRight, X, ListChecks } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import type { Issue, SeverityLevel } from '@/types';
@@ -19,6 +20,14 @@ const STATUS_MAP: Record<string, string> = {
   closed: '已关闭',
 };
 
+const CATEGORY_MAP: Record<string, string> = {
+  duplicate: '重复代码',
+  complexity: '复杂度',
+  defect: '缺陷风险',
+  vulnerability: '依赖漏洞',
+  coverage: '测试覆盖',
+};
+
 const SEVERITY_OPTIONS: { value: SeverityLevel; label: string }[] = [
   { value: 'critical', label: '严重' },
   { value: 'high', label: '高' },
@@ -30,24 +39,59 @@ const PAGE_SIZE = 10;
 
 export default function Issues() {
   const { issues, projects, teamMembers } = useStore();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [projectFilter, setProjectFilter] = useState('');
+  const urlProject = searchParams.get('project') || '';
+  const urlCategory = searchParams.get('category') || '';
+  const urlSeverity = searchParams.get('severity') || '';
+  const urlId = searchParams.get('id') || '';
+
+  const [projectFilter, setProjectFilter] = useState(urlProject);
   const [assigneeFilter, setAssigneeFilter] = useState('');
-  const [severityFilter, setSeverityFilter] = useState('');
+  const [severityFilter, setSeverityFilter] = useState(urlSeverity);
+  const [categoryFilter, setCategoryFilter] = useState(urlCategory);
   const [filePathFilter, setFilePathFilter] = useState('');
   const [page, setPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+
+  useEffect(() => {
+    setProjectFilter(urlProject);
+    setSeverityFilter(urlSeverity);
+    setCategoryFilter(urlCategory);
+    setPage(1);
+  }, [urlProject, urlSeverity, urlCategory]);
+
+  useEffect(() => {
+    if (urlId) {
+      const issue = issues.find((i) => i.id === urlId);
+      if (issue) {
+        setSelectedIssue(issue);
+        setDrawerOpen(true);
+      }
+    }
+  }, [urlId, issues]);
+
+  const updateUrlParam = (key: string, value: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+    setSearchParams(params);
+  };
 
   const filtered = useMemo(() => {
     return issues.filter((issue) => {
       if (projectFilter && issue.projectId !== projectFilter) return false;
       if (assigneeFilter && issue.assignee !== assigneeFilter) return false;
       if (severityFilter && issue.severity !== severityFilter) return false;
+      if (categoryFilter && issue.category !== categoryFilter) return false;
       if (filePathFilter && !issue.filePath.toLowerCase().includes(filePathFilter.toLowerCase())) return false;
       return true;
     });
-  }, [issues, projectFilter, assigneeFilter, severityFilter, filePathFilter]);
+  }, [issues, projectFilter, assigneeFilter, severityFilter, categoryFilter, filePathFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -57,7 +101,12 @@ export default function Issues() {
     {
       key: 'project',
       label: projectFilter ? projects.find((p) => p.id === projectFilter)?.name ?? '' : '',
-      clear: () => { setProjectFilter(''); setPage(1); },
+      clear: () => { setProjectFilter(''); updateUrlParam('project', ''); setPage(1); },
+    },
+    {
+      key: 'category',
+      label: categoryFilter ? `分类: ${CATEGORY_MAP[categoryFilter] ?? categoryFilter}` : '',
+      clear: () => { setCategoryFilter(''); updateUrlParam('category', ''); setPage(1); },
     },
     {
       key: 'assignee',
@@ -67,7 +116,7 @@ export default function Issues() {
     {
       key: 'severity',
       label: severityFilter ? `级别: ${SEVERITY_MAP[severityFilter]}` : '',
-      clear: () => { setSeverityFilter(''); setPage(1); },
+      clear: () => { setSeverityFilter(''); updateUrlParam('severity', ''); setPage(1); },
     },
     {
       key: 'filePath',
@@ -79,11 +128,13 @@ export default function Issues() {
   const openDrawer = (issue: Issue) => {
     setSelectedIssue(issue);
     setDrawerOpen(true);
+    updateUrlParam('id', issue.id);
   };
 
   const closeDrawer = () => {
     setDrawerOpen(false);
     setSelectedIssue(null);
+    updateUrlParam('id', '');
   };
 
   const selectCls =
@@ -109,12 +160,23 @@ export default function Issues() {
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={projectFilter}
-            onChange={(e) => { setProjectFilter(e.target.value); setPage(1); }}
+            onChange={(e) => { setProjectFilter(e.target.value); updateUrlParam('project', e.target.value); setPage(1); }}
             className={selectCls}
           >
             <option value="">全部项目</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => { setCategoryFilter(e.target.value); updateUrlParam('category', e.target.value); setPage(1); }}
+            className={selectCls}
+          >
+            <option value="">全部分类</option>
+            {Object.entries(CATEGORY_MAP).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
             ))}
           </select>
 
@@ -131,7 +193,7 @@ export default function Issues() {
 
           <select
             value={severityFilter}
-            onChange={(e) => { setSeverityFilter(e.target.value); setPage(1); }}
+            onChange={(e) => { setSeverityFilter(e.target.value); updateUrlParam('severity', e.target.value); setPage(1); }}
             className={selectCls}
           >
             <option value="">全部级别</option>
@@ -170,8 +232,10 @@ export default function Issues() {
                 setProjectFilter('');
                 setAssigneeFilter('');
                 setSeverityFilter('');
+                setCategoryFilter('');
                 setFilePathFilter('');
                 setPage(1);
+                setSearchParams({});
               }}
               className="text-xs text-surface-500 hover:text-surface-300 transition-colors ml-1"
             >
@@ -187,6 +251,7 @@ export default function Issues() {
             <thead>
               <tr className="border-b border-surface-700/50">
                 <th className="text-left px-4 py-3 text-surface-400 font-medium">问题描述</th>
+                <th className="text-left px-4 py-3 text-surface-400 font-medium">分类</th>
                 <th className="text-left px-4 py-3 text-surface-400 font-medium">所属项目</th>
                 <th className="text-left px-4 py-3 text-surface-400 font-medium">文件位置</th>
                 <th className="text-left px-4 py-3 text-surface-400 font-medium">严重级别</th>
@@ -207,6 +272,7 @@ export default function Issues() {
                   <td className="px-4 py-3">
                     <span className="text-surface-100 font-medium">{issue.title}</span>
                   </td>
+                  <td className="px-4 py-3 text-surface-400">{CATEGORY_MAP[issue.category] ?? issue.category}</td>
                   <td className="px-4 py-3 text-surface-400">{issue.projectName}</td>
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs text-brand-400">{issue.filePath}</span>
@@ -225,7 +291,7 @@ export default function Issues() {
               ))}
               {paged.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-surface-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-surface-500">
                     暂无匹配的问题记录
                   </td>
                 </tr>

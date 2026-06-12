@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { GitMerge, Terminal, BarChart3 } from 'lucide-react';
 import RepoAccessPanel from '@/components/scan/RepoAccessPanel';
 import ScanConsolePanel from '@/components/scan/ScanConsolePanel';
 import ScanResultsPanel from '@/components/scan/ScanResultsPanel';
+import { useStore } from '@/store/useStore';
 
 const TABS = [
   { key: 'repo', label: '仓库接入', icon: GitMerge },
@@ -13,7 +15,41 @@ const TABS = [
 type TabKey = typeof TABS[number]['key'];
 
 export default function Scan() {
-  const [activeTab, setActiveTab] = useState<TabKey>('repo');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<TabKey>((searchParams.get('tab') as TabKey) || 'repo');
+  const [selectedProjectId, setSelectedProjectId] = useState(searchParams.get('project') || '');
+  const { projects } = useStore();
+
+  const location = useLocation();
+
+  useEffect(() => {
+    const tab = searchParams.get('tab') as TabKey;
+    if (tab && (tab === 'repo' || tab === 'console' || tab === 'results')) {
+      setActiveTab(tab);
+    }
+    const proj = searchParams.get('project');
+    if (proj) {
+      setSelectedProjectId(proj);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    params.tab = activeTab;
+    if (selectedProjectId && activeTab !== 'repo') params.project = selectedProjectId;
+    setSearchParams(params, { replace: true });
+  }, [activeTab, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId && projects.length > 0) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects]);
+
+  const handleScanComplete = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setActiveTab('results');
+  };
 
   return (
     <div className="space-y-6">
@@ -43,10 +79,27 @@ export default function Scan() {
         })}
       </div>
 
-      <div className="animate-fade-in-up">
-        {activeTab === 'repo' && <RepoAccessPanel />}
-        {activeTab === 'console' && <ScanConsolePanel />}
-        {activeTab === 'results' && <ScanResultsPanel />}
+      <div key={activeTab} className="animate-fade-in-up">
+        {activeTab === 'repo' && (
+          <RepoAccessPanel onGoToConsole={(projectId) => {
+            if (projectId) setSelectedProjectId(projectId);
+            setActiveTab('console');
+          }} />
+        )}
+        {activeTab === 'console' && (
+          <ScanConsolePanel
+            selectedProjectId={selectedProjectId}
+            onSelectProject={setSelectedProjectId}
+            onScanComplete={handleScanComplete}
+          />
+        )}
+        {activeTab === 'results' && (
+          <ScanResultsPanel
+            selectedProjectId={selectedProjectId}
+            onSelectProject={setSelectedProjectId}
+            onGoToConsole={() => setActiveTab('console')}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Plus, Calendar, ChevronDown, ChevronUp, CheckCircle2, Circle, Target } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Calendar, ChevronRight, Target, User } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import CreatePlanModal from '@/components/CreatePlanModal';
 
@@ -10,15 +11,12 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
 };
 
 export default function Plans() {
-  const { plans, issues, completePlanIssue } = useStore();
+  const { plans, issues, projects } = useStore();
   const [showModal, setShowModal] = useState(false);
-  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
-
-  const toggleExpand = (planId: string) => {
-    setExpandedPlanId((prev) => (prev === planId ? null : planId));
-  };
+  const navigate = useNavigate();
 
   const getIssue = (id: string) => issues.find((i) => i.id === id);
+  const getProjectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
 
   return (
     <div className="space-y-6">
@@ -46,13 +44,23 @@ export default function Plans() {
             const totalCount = plan.issueIds.length;
             const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
             const status = STATUS_MAP[plan.status];
-            const isExpanded = expandedPlanId === plan.id;
+
+            const planIssues = plan.issueIds.map((id) => getIssue(id)).filter(Boolean) as ReturnType<typeof getIssue>[];
+            const projectsInvolved = new Set(planIssues.map((i) => i?.projectId).filter(Boolean));
+            const assignees = new Set(planIssues.map((i) => i?.assignee).filter(Boolean));
+            const criticalCount = planIssues.filter((i) => i?.severity === 'critical' && !plan.completedIssueIds.includes(i.id)).length;
 
             return (
-              <div key={plan.id} className="card-glow rounded-xl overflow-hidden">
-                <div className="p-5 cursor-pointer" onClick={() => toggleExpand(plan.id)}>
+              <div
+                key={plan.id}
+                className="card-glow rounded-xl overflow-hidden cursor-pointer group hover:border-brand-500/30 transition-all"
+                onClick={() => navigate(`/plans/${plan.id}`)}
+              >
+                <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
-                    <h3 className="font-display font-semibold text-surface-100">{plan.name}</h3>
+                    <h3 className="font-display font-semibold text-surface-100 group-hover:text-brand-400 transition-colors">
+                      {plan.name}
+                    </h3>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${status.className}`}>
                       {status.label}
                     </span>
@@ -68,64 +76,33 @@ export default function Plans() {
                     <span>{completedCount}/{totalCount} 问题</span>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 mb-4">
                     <div className="flex-1 h-2 bg-surface-700 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-brand-500 rounded-full transition-all duration-500"
                         style={{ width: `${percentage}%` }}
                       />
                     </div>
-                    <span className="text-sm font-medium text-brand-400 tabular-nums">{percentage}%</span>
-                    {isExpanded ? (
-                      <ChevronUp className="w-4 h-4 text-surface-500" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-surface-500" />
+                    <span className="text-sm font-medium text-brand-400 tabular-nums min-w-[40px] text-right">{percentage}%</span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-surface-500 pt-3 border-t border-surface-700/50">
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5 text-surface-400" />
+                        {projectsInvolved.size} 个项目
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <User className="w-3.5 h-3.5 text-surface-400" />
+                        {assignees.size} 人负责
+                      </span>
+                    </div>
+                    {criticalCount > 0 && (
+                      <span className="text-red-400 font-medium">{criticalCount} 严重风险</span>
                     )}
+                    <ChevronRight className="w-4 h-4 text-surface-600 group-hover:text-brand-400 transition-colors" />
                   </div>
                 </div>
-
-                {isExpanded && (
-                  <div className="border-t border-surface-700/50 px-5 py-3">
-                    {plan.issueIds.length === 0 ? (
-                      <p className="text-surface-500 text-sm text-center py-2">暂无关联问题</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {plan.issueIds.map((issueId) => {
-                          const issue = getIssue(issueId);
-                          if (!issue) return null;
-                          const isCompleted = plan.completedIssueIds.includes(issueId);
-
-                          return (
-                            <div
-                              key={issueId}
-                              className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-700/30 transition-colors"
-                            >
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!isCompleted) completePlanIssue(plan.id, issueId);
-                                }}
-                                className="flex-shrink-0"
-                              >
-                                {isCompleted ? (
-                                  <CheckCircle2 className="w-5 h-5 text-brand-500" />
-                                ) : (
-                                  <Circle className="w-5 h-5 text-surface-600 hover:text-surface-400 transition-colors" />
-                                )}
-                              </button>
-                              <span className={`text-sm flex-1 ${isCompleted ? 'line-through text-surface-500' : 'text-surface-300'}`}>
-                                {issue.title}
-                              </span>
-                              <span className={`badge-${issue.severity} text-[10px]`}>
-                                {issue.severity}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}
