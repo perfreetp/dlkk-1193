@@ -1,7 +1,7 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useState, useMemo } from 'react';
-import { ArrowLeft, GitBranch, Clock, AlertTriangle, Shield, Copy, TestTube, Bug, BarChart2, ListChecks, Settings, Target, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
+import { ArrowLeft, GitBranch, Clock, AlertTriangle, Shield, Copy, TestTube, Bug, BarChart2, ListChecks, Settings, Target, TrendingUp, TrendingDown, Minus, ChevronDown } from 'lucide-react';
+import { ComposedChart, Area, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { useStore } from '@/store/useStore';
 import ScoreRing from '@/components/ScoreRing';
 import type { IssueCategory, ScanResults } from '@/types';
@@ -13,6 +13,16 @@ const CATEGORY_CONFIG: Record<IssueCategory, { label: string; icon: typeof Copy;
   vulnerability: { label: '依赖漏洞', icon: Shield, color: '#F97316', key: 'dependencyVulnerabilities' },
   coverage: { label: '测试覆盖', icon: TestTube, color: '#06D6A0', key: 'testCoverage' },
 };
+
+const METRIC_CONFIG = {
+  bugRisks: { label: '缺陷风险', category: 'defect' as IssueCategory, color: '#EF4444', key: 'defectRiskCount' as keyof ScanResults, better: 'down' as const },
+  securityVulns: { label: '依赖漏洞', category: 'vulnerability' as IssueCategory, color: '#F97316', key: 'dependencyVulnerabilities' as keyof ScanResults, better: 'down' as const },
+  codeSmells: { label: '代码异味', category: 'complexity' as IssueCategory, color: '#8B5CF6', key: 'cyclomaticComplexity' as keyof ScanResults, better: 'down' as const },
+  coverage: { label: '测试覆盖', category: 'coverage' as IssueCategory, color: '#10B981', key: 'testCoverage' as keyof ScanResults, better: 'up' as const },
+  duplications: { label: '重复代码', category: 'duplicate' as IssueCategory, color: '#F59E0B', key: 'duplicateCodeRate' as keyof ScanResults, better: 'down' as const },
+} as const;
+
+type MetricKey = keyof typeof METRIC_CONFIG;
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
 
@@ -39,6 +49,9 @@ export default function ProjectDetail() {
   const navigate = useNavigate();
   const { projects, issues, scanRecords, getOrCreateRuleConfig } = useStore();
   const [showTrend, setShowTrend] = useState(true);
+  const [compareMode, setCompareMode] = useState<'all' | 'last2' | 'custom'>('all');
+  const [customStartIdx, setCustomStartIdx] = useState<number>(0);
+  const [customEndIdx, setCustomEndIdx] = useState<number>(0);
 
   const project = projects.find((p) => p.id === projectId);
   const ruleConfig = getOrCreateRuleConfig(projectId ?? '');
@@ -58,18 +71,50 @@ export default function ProjectDetail() {
   const results = latestScan?.results;
   const prevResults = prevScan?.results;
 
+  const displayedScans = useMemo(() => {
+    if (allScans.length === 0) return [];
+    if (compareMode === 'all') {
+      return allScans.slice(-10);
+    }
+    if (compareMode === 'last2') {
+      return allScans.slice(-2);
+    }
+    const start = Math.min(customStartIdx, customEndIdx);
+    const end = Math.max(customStartIdx, customEndIdx);
+    return allScans.slice(start, end + 1);
+  }, [allScans, compareMode, customStartIdx, customEndIdx]);
+
   const trendData = useMemo(() =>
-    allScans.slice(-10).map((r) => ({
-      date: new Date(r.startTime).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
-      score: calculateQualityScore(r.results!),
-      duplicateCodeRate: r.results!.duplicateCodeRate,
-      cyclomaticComplexity: r.results!.cyclomaticComplexity,
-      defectRiskCount: r.results!.defectRiskCount,
-      dependencyVulnerabilities: r.results!.dependencyVulnerabilities,
-      testCoverage: r.results!.testCoverage,
-    })),
-    [allScans]
+    displayedScans.map((r, idx) => {
+      const baseData = {
+        batch: `#${idx + 1}`,
+        date: new Date(r.startTime).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
+        fullTime: new Date(r.startTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+        score: calculateQualityScore(r.results!),
+      };
+      (Object.keys(METRIC_CONFIG) as MetricKey[]).forEach((key) => {
+        const config = METRIC_CONFIG[key];
+        (baseData as any)[key] = r.results![config.key];
+      });
+      return baseData;
+    }),
+    [displayedScans]
   );
+
+  const scoreDelta = useMemo(() => {
+    if (!results || !prevResults) return null;
+    return calculateQualityScore(results) - calculateQualityScore(prevResults);
+  }, [results, prevResults]);
+
+  const metricDeltas = useMemo(() => {
+    if (!results || !prevResults) return {} as Record<MetricKey, number | null>;
+    const deltas: Record<string, number | null> = {};
+    (Object.keys(METRIC_CONFIG) as MetricKey[]).forEach((key) => {
+      const config = METRIC_CONFIG[key];
+      deltas[key] = results[config.key] - prevResults[config.key];
+    });
+    return deltas;
+  }, [results, prevResults]);
 
   const getChangeInfo = (key: keyof ScanResults) => {
     if (!results || !prevResults) return null;
@@ -113,6 +158,13 @@ export default function ProjectDetail() {
     return val % 1 !== 0 ? `${val.toFixed(1)}${unit}` : `${val}${unit}`;
   };
 
+  const formatDeltaNumber = (val: number, key: string) => {
+    const unit = key === 'testCoverage' || key === 'duplicateCodeRate' ? '%' : '';
+    const sign = val > 0 ? '+' : '';
+    const formatted = val % 1 !== 0 ? val.toFixed(1) : val.toString();
+    return `${sign}${formatted}${unit}`;
+  };
+
   const goToIssues = (filters: Record<string, string>) => {
     const params = new URLSearchParams();
     params.set('project', projectId ?? '');
@@ -124,6 +176,15 @@ export default function ProjectDetail() {
     navigate(`/scan?tab=${tab}&project=${projectId}`);
   };
 
+  const handleDeltaClick = (metricKey: MetricKey | 'score') => {
+    const filters: Record<string, string> = {};
+    if (metricKey !== 'score') {
+      const config = METRIC_CONFIG[metricKey];
+      filters.category = config.category;
+    }
+    goToIssues(filters);
+  };
+
   if (!project) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
@@ -132,6 +193,36 @@ export default function ProjectDetail() {
       </div>
     );
   }
+
+  const renderDeltaItem = (label: string, value: number | null, metricKey: MetricKey | 'score', color?: string) => {
+    if (value === null) return null;
+    const isBetter = metricKey === 'score' ? value > 0 : METRIC_CONFIG[metricKey as MetricKey].better === 'up' ? value > 0 : value < 0;
+    const isWorse = metricKey === 'score' ? value < 0 : METRIC_CONFIG[metricKey as MetricKey].better === 'up' ? value < 0 : value > 0;
+    const colorClass = isBetter ? 'text-emerald-400' : isWorse ? 'text-red-400' : 'text-surface-500';
+    const bgClass = isBetter ? 'bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/20' : isWorse ? 'bg-red-500/5 hover:bg-red-500/10 border-red-500/20' : 'bg-surface-800/50 hover:bg-surface-700/50 border-surface-700/50';
+    const glowClass = isBetter ? 'group-hover:shadow-[0_0_15px_rgba(16,185,129,0.15)]' : isWorse ? 'group-hover:shadow-[0_0_15px_rgba(239,68,68,0.15)]' : '';
+
+    return (
+      <button
+        key={metricKey}
+        onClick={() => handleDeltaClick(metricKey)}
+        className={`group w-full p-3 rounded-lg border transition-all cursor-pointer text-left ${bgClass} ${glowClass}`}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-surface-300">{label}</span>
+          <span className={`flex items-center gap-0.5 text-sm font-semibold tabular-nums ${colorClass}`}>
+            {isBetter ? <TrendingUp className="w-4 h-4" /> : isWorse ? <TrendingDown className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+            {formatDeltaNumber(value, metricKey === 'score' ? 'score' : METRIC_CONFIG[metricKey as MetricKey].key)}
+          </span>
+        </div>
+        {metricKey !== 'score' && color && (
+          <div className="mt-2 h-0.5 rounded-full overflow-hidden bg-surface-700/50">
+            <div className="h-full rounded-full" style={{ width: '100%', backgroundColor: color }} />
+          </div>
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -283,69 +374,184 @@ export default function ProjectDetail() {
               })}
             </div>
           ) : (
-            <div>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trendData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#06D6A0" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#06D6A0" stopOpacity={0} />
-                      </linearGradient>
-                      {(Object.keys(CATEGORY_CONFIG) as IssueCategory[]).map((cat) => {
-                        const config = CATEGORY_CONFIG[cat];
-                        return (
-                          <linearGradient key={config.key} id={`trend-${config.key}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={config.color} stopOpacity={0.2} />
-                            <stop offset="95%" stopColor={config.color} stopOpacity={0} />
-                          </linearGradient>
-                        );
-                      })}
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" strokeOpacity={0.4} />
-                    <XAxis dataKey="date" tick={{ fill: '#64748B', fontSize: 11 }} axisLine={{ stroke: '#334155' }} />
-                    <YAxis tick={{ fill: '#64748B', fontSize: 11 }} axisLine={{ stroke: '#334155' }} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: '8px', fontSize: 12 }}
-                      labelStyle={{ color: '#94A3B8' }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="score"
-                      stroke="#06D6A0"
-                      strokeWidth={2.5}
-                      fill="url(#scoreGrad)"
-                      name="质量评分"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-surface-400">对比批次：</span>
+                <select
+                  value={compareMode}
+                  onChange={(e) => {
+                    const val = e.target.value as 'all' | 'last2' | 'custom';
+                    setCompareMode(val);
+                    if (val === 'custom' && allScans.length >= 2) {
+                      setCustomStartIdx(Math.max(0, allScans.length - 5));
+                      setCustomEndIdx(allScans.length - 1);
+                    }
+                  }}
+                  className="bg-surface-800 border border-surface-700/50 rounded-lg px-3 py-1.5 text-sm text-surface-200 focus:outline-none focus:border-brand-500/50 transition-colors appearance-none cursor-pointer"
+                >
+                  <option value="all">全部批次</option>
+                  <option value="last2">最近一次 vs 上一次</option>
+                  <option value="custom">自定义对比</option>
+                </select>
+
+                {compareMode === 'custom' && allScans.length >= 2 && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-surface-500">从</span>
+                      <select
+                        value={customStartIdx}
+                        onChange={(e) => setCustomStartIdx(Number(e.target.value))}
+                        className="bg-surface-800 border border-surface-700/50 rounded-lg px-2 py-1 text-xs text-surface-200 focus:outline-none focus:border-brand-500/50 transition-colors appearance-none cursor-pointer"
+                      >
+                        {allScans.map((scan, idx) => (
+                          <option key={scan.id} value={idx}>
+                            #{idx + 1} - {formatTime(scan.startTime)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-surface-500">到</span>
+                      <select
+                        value={customEndIdx}
+                        onChange={(e) => setCustomEndIdx(Number(e.target.value))}
+                        className="bg-surface-800 border border-surface-700/50 rounded-lg px-2 py-1 text-xs text-surface-200 focus:outline-none focus:border-brand-500/50 transition-colors appearance-none cursor-pointer"
+                      >
+                        {allScans.map((scan, idx) => (
+                          <option key={scan.id} value={idx}>
+                            #{idx + 1} - {formatTime(scan.startTime)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-4 mt-3">
-                <span className="flex items-center gap-1.5 text-xs text-surface-400">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#06D6A0' }} />
-                  质量评分
-                </span>
-                {(Object.keys(CATEGORY_CONFIG) as IssueCategory[]).map((cat) => {
-                  const config = CATEGORY_CONFIG[cat];
-                  const change = getChangeInfo(config.key);
-                  return (
-                    <button
-                      key={config.key}
-                      onClick={() => goToIssues({ category: cat })}
-                      className="flex items-center gap-1.5 text-xs text-surface-400 hover:text-surface-200 transition-colors"
-                    >
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: config.color }} />
-                      {config.label}
-                      {change && (
-                        <span className={`${
-                          change.isBetter ? 'text-emerald-400' : change.isWorse ? 'text-red-400' : ''
-                        }`}>
-                          {change.diff > 0 ? '+' : ''}{change.diff % 1 !== 0 ? change.diff.toFixed(1) : change.diff}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2">
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={trendData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                        <defs>
+                          <linearGradient id="scoreGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#06D6A0" stopOpacity={0.4} />
+                            <stop offset="50%" stopColor="#06D6A0" stopOpacity={0.15} />
+                            <stop offset="95%" stopColor="#06D6A0" stopOpacity={0} />
+                          </linearGradient>
+                          <filter id="scoreGlow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="2" result="blur" />
+                            <feMerge>
+                              <feMergeNode in="blur" />
+                              <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                          </filter>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" strokeOpacity={0.4} />
+                        <XAxis
+                          dataKey="batch"
+                          tick={{ fill: '#64748B', fontSize: 11 }}
+                          axisLine={{ stroke: '#334155' }}
+                          tickLine={{ stroke: '#334155' }}
+                        />
+                        <YAxis
+                          yAxisId="left"
+                          domain={[0, 100]}
+                          tick={{ fill: '#06D6A0', fontSize: 11 }}
+                          axisLine={{ stroke: '#334155' }}
+                          tickLine={{ stroke: '#334155' }}
+                          label={{ value: '评分', angle: -90, position: 'insideLeft', fill: '#06D6A0', fontSize: 11 }}
+                        />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          tick={{ fill: '#94A3B8', fontSize: 11 }}
+                          axisLine={{ stroke: '#334155' }}
+                          tickLine={{ stroke: '#334155' }}
+                          label={{ value: '指标', angle: 90, position: 'insideRight', fill: '#94A3B8', fontSize: 11 }}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: '#1E293B',
+                            border: '1px solid #334155',
+                            borderRadius: '8px',
+                            fontSize: 12,
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                          }}
+                          labelStyle={{ color: '#94A3B8', fontWeight: 600, marginBottom: 8 }}
+                          itemStyle={{ padding: '2px 0' }}
+                          formatter={(value: any, name: string, props: any) => {
+                            const payload = props.payload;
+                            if (name === '质量评分') {
+                              return [`${value} 分`, name];
+                            }
+                            const metricKey = Object.keys(METRIC_CONFIG).find(k => METRIC_CONFIG[k as MetricKey].label === name);
+                            if (metricKey) {
+                              const unit = metricKey === 'coverage' || metricKey === 'duplications' ? '%' : '';
+                              return [`${value}${unit}`, name];
+                            }
+                            return [value, name];
+                          }}
+                          labelFormatter={(label: string, payload: any[]) => {
+                            if (payload.length > 0 && payload[0].payload?.fullTime) {
+                              return `${label} · ${payload[0].payload.fullTime}`;
+                            }
+                            return label;
+                          }}
+                        />
+                        <Legend
+                          wrapperStyle={{ paddingTop: 10, fontSize: 12 }}
+                          iconType="circle"
+                          formatter={(value: string) => <span className="text-surface-300">{value}</span>}
+                        />
+                        <Area
+                          yAxisId="left"
+                          type="monotone"
+                          dataKey="score"
+                          name="质量评分"
+                          stroke="#06D6A0"
+                          strokeWidth={2.5}
+                          fill="url(#scoreGrad)"
+                          filter="url(#scoreGlow)"
+                          dot={{ fill: '#06D6A0', strokeWidth: 2, r: 4, stroke: '#1E293B' }}
+                          activeDot={{ fill: '#06D6A0', strokeWidth: 2, r: 6, stroke: '#fff' }}
+                        />
+                        {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
+                          const config = METRIC_CONFIG[key];
+                          return (
+                            <Bar
+                              key={key}
+                              yAxisId="right"
+                              dataKey={key}
+                              name={config.label}
+                              fill={config.color}
+                              barSize={20}
+                              opacity={0.85}
+                              radius={[4, 4, 0, 0]}
+                            />
+                          );
+                        })}
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="font-display font-semibold text-surface-100 text-sm flex items-center gap-2">
+                    <Target className="w-4 h-4 text-brand-400" />
+                    相比上一次变化
+                  </h3>
+                  <div className="space-y-2">
+                    {renderDeltaItem('质量评分', scoreDelta, 'score')}
+                    {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
+                      const config = METRIC_CONFIG[key];
+                      return renderDeltaItem(config.label, metricDeltas[key] ?? null, key, config.color);
+                    })}
+                  </div>
+                  <p className="text-[10px] text-surface-600 pt-1 border-t border-surface-700/30">
+                    点击任意项可查看对应问题列表
+                  </p>
+                </div>
               </div>
             </div>
           )}

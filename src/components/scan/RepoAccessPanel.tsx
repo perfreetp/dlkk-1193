@@ -29,6 +29,7 @@ export default function RepoAccessPanel({ onGoToConsole }: RepoAccessPanelProps)
       branch: branch.trim() || 'main',
       lastScanTime: null,
       status: 'disconnected',
+      groupId: 'g3',
     });
     setRepoUrl('');
     setBranch('main');

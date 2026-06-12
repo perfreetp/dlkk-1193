@@ -1,10 +1,18 @@
 import { useState } from 'react';
-import { X, Check } from 'lucide-react';
+import { X, Check, Trash2, Plus } from 'lucide-react';
 import { useStore } from '@/store/useStore';
+import type { PlanMilestone } from '@/types';
 
 interface CreatePlanModalProps {
   open: boolean;
   onClose: () => void;
+}
+
+interface NewMilestoneForm {
+  name: string;
+  description: string;
+  startDate: string;
+  endDate: string;
 }
 
 export default function CreatePlanModal({ open, onClose }: CreatePlanModalProps) {
@@ -14,6 +22,14 @@ export default function CreatePlanModal({ open, onClose }: CreatePlanModalProps)
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([]);
+  const [milestones, setMilestones] = useState<PlanMilestone[]>([]);
+  const [showMilestoneForm, setShowMilestoneForm] = useState(false);
+  const [newMilestone, setNewMilestone] = useState<NewMilestoneForm>({
+    name: '',
+    description: '',
+    startDate: '',
+    endDate: '',
+  });
 
   const availableIssues = issues.filter(
     (issue) => issue.status !== 'resolved' && issue.status !== 'closed'
@@ -29,6 +45,37 @@ export default function CreatePlanModal({ open, onClose }: CreatePlanModalProps)
     );
   };
 
+  const resetForm = () => {
+    setName('');
+    setDescription('');
+    setStartDate('');
+    setEndDate('');
+    setSelectedIssueIds([]);
+    setMilestones([]);
+    setShowMilestoneForm(false);
+    setNewMilestone({ name: '', description: '', startDate: '', endDate: '' });
+  };
+
+  const handleAddMilestone = () => {
+    if (!newMilestone.name.trim() || !newMilestone.startDate || !newMilestone.endDate) return;
+    const milestone: PlanMilestone = {
+      id: Date.now().toString(),
+      name: newMilestone.name.trim(),
+      description: newMilestone.description.trim(),
+      startDate: newMilestone.startDate,
+      endDate: newMilestone.endDate,
+      issueIds: [],
+      status: 'pending',
+    };
+    setMilestones((prev) => [...prev, milestone]);
+    setNewMilestone({ name: '', description: '', startDate: '', endDate: '' });
+    setShowMilestoneForm(false);
+  };
+
+  const handleDeleteMilestone = (milestoneId: string) => {
+    setMilestones((prev) => prev.filter((m) => m.id !== milestoneId));
+  };
+
   const handleSubmit = () => {
     if (!name.trim() || !startDate || !endDate) return;
     addPlan({
@@ -38,22 +85,24 @@ export default function CreatePlanModal({ open, onClose }: CreatePlanModalProps)
       endDate,
       status: 'active',
       issueIds: selectedIssueIds,
+      milestones,
     });
-    setName('');
-    setDescription('');
-    setStartDate('');
-    setEndDate('');
-    setSelectedIssueIds([]);
+    resetForm();
+    onClose();
+  };
+
+  const handleCancel = () => {
+    resetForm();
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg mx-4 card-glow rounded-xl p-6 animate-fade-in-up">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCancel} />
+      <div className="relative w-full max-w-lg mx-4 card-glow rounded-xl p-6 animate-fade-in-up max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-display font-bold text-lg text-surface-100">创建改进计划</h2>
-          <button onClick={onClose} className="text-surface-400 hover:text-surface-200 transition-colors">
+          <button onClick={handleCancel} className="text-surface-400 hover:text-surface-200 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -131,10 +180,124 @@ export default function CreatePlanModal({ open, onClose }: CreatePlanModalProps)
               )}
             </div>
           </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm text-surface-300">
+                阶段里程碑 <span className="text-surface-500">({milestones.length} 已添加)</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowMilestoneForm(true)}
+                className="flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                添加阶段
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {milestones.length > 0 && (
+                <div className="space-y-1.5">
+                  {milestones.map((milestone) => (
+                    <div
+                      key={milestone.id}
+                      className="flex items-center gap-3 bg-surface-900 border border-surface-700/50 rounded-lg px-3 py-2.5"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-surface-200 font-medium truncate">{milestone.name}</div>
+                        <div className="text-xs text-surface-500 mt-0.5">
+                          {milestone.startDate} ~ {milestone.endDate}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMilestone(milestone.id)}
+                        className="text-surface-500 hover:text-red-400 transition-colors p-1 flex-shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {showMilestoneForm && (
+                <div className="bg-surface-900 border border-brand-500/30 rounded-lg p-3 space-y-3">
+                  <div>
+                    <label className="block text-xs text-surface-400 mb-1">阶段名称</label>
+                    <input
+                      type="text"
+                      value={newMilestone.name}
+                      onChange={(e) => setNewMilestone((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="输入阶段名称"
+                      className="w-full bg-surface-800 border border-surface-700/50 rounded-md px-2.5 py-1.5 text-surface-200 text-sm placeholder-surface-500 focus:outline-none focus:border-brand-500/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-surface-400 mb-1">阶段描述</label>
+                    <textarea
+                      value={newMilestone.description}
+                      onChange={(e) => setNewMilestone((prev) => ({ ...prev, description: e.target.value }))}
+                      placeholder="描述本阶段目标"
+                      rows={2}
+                      className="w-full bg-surface-800 border border-surface-700/50 rounded-md px-2.5 py-1.5 text-surface-200 text-sm placeholder-surface-500 focus:outline-none focus:border-brand-500/50 transition-colors resize-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-surface-400 mb-1">开始日期</label>
+                      <input
+                        type="date"
+                        value={newMilestone.startDate}
+                        onChange={(e) => setNewMilestone((prev) => ({ ...prev, startDate: e.target.value }))}
+                        className="w-full bg-surface-800 border border-surface-700/50 rounded-md px-2.5 py-1.5 text-surface-200 text-sm focus:outline-none focus:border-brand-500/50 transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-surface-400 mb-1">结束日期</label>
+                      <input
+                        type="date"
+                        value={newMilestone.endDate}
+                        onChange={(e) => setNewMilestone((prev) => ({ ...prev, endDate: e.target.value }))}
+                        className="w-full bg-surface-800 border border-surface-700/50 rounded-md px-2.5 py-1.5 text-surface-200 text-sm focus:outline-none focus:border-brand-500/50 transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMilestoneForm(false);
+                        setNewMilestone({ name: '', description: '', startDate: '', endDate: '' });
+                      }}
+                      className="btn-ghost text-xs px-3 py-1.5"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddMilestone}
+                      disabled={!newMilestone.name.trim() || !newMilestone.startDate || !newMilestone.endDate}
+                      className="btn-primary text-xs px-3 py-1.5 disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      确认添加
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {milestones.length === 0 && !showMilestoneForm && (
+                <div className="bg-surface-900 border border-dashed border-surface-700/50 rounded-lg py-6 text-center">
+                  <p className="text-sm text-surface-500">暂无阶段，点击上方"添加阶段"按钮创建</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
-          <button onClick={onClose} className="btn-ghost text-sm">取消</button>
+          <button onClick={handleCancel} className="btn-ghost text-sm">取消</button>
           <button
             onClick={handleSubmit}
             disabled={!name.trim() || !startDate || !endDate}

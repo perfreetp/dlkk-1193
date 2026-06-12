@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   Project,
+  ProjectGroup,
   ScanRecord,
   ScanSchedule,
   Issue,
@@ -205,21 +206,41 @@ function getDefaultScanSchedule(projectId: string): ScanSchedule {
   };
 }
 
+const INITIAL_PROJECT_GROUPS: ProjectGroup[] = [
+  { id: 'g1', name: '金融业务线', description: '支付、交易、清结算相关系统', color: '#3B82F6' },
+  { id: 'g2', name: '数据平台组', description: '数据采集、处理、分析平台', color: '#8B5CF6' },
+  { id: 'g3', name: '用户与平台组', description: '用户中心、基础平台、运维工具', color: '#06D6A0' },
+];
+
 const INITIAL_PROJECTS: Project[] = [
-  { id: 'p1', name: 'NovaPay 支付网关', repoUrl: 'https://github.com/team/novapay-gateway', branch: 'main', lastScanTime: '2026-06-13T08:30:00', qualityScore: 87, totalIssues: 12, criticalIssues: 1, status: 'connected' },
-  { id: 'p2', name: 'Atlas 数据平台', repoUrl: 'https://github.com/team/atlas-platform', branch: 'develop', lastScanTime: '2026-06-12T14:20:00', qualityScore: 72, totalIssues: 34, criticalIssues: 5, status: 'connected' },
-  { id: 'p3', name: 'Meridian 用户中心', repoUrl: 'https://github.com/team/meridian-user', branch: 'main', lastScanTime: '2026-06-13T06:00:00', qualityScore: 91, totalIssues: 6, criticalIssues: 0, status: 'connected' },
-  { id: 'p4', name: 'Horizon 运维工具', repoUrl: 'https://github.com/team/horizon-ops', branch: 'release/2.3', lastScanTime: '2026-06-11T20:15:00', qualityScore: 63, totalIssues: 48, criticalIssues: 8, status: 'connected' },
-  { id: 'p5', name: 'Pulse 监控服务', repoUrl: 'https://github.com/team/pulse-monitor', branch: 'main', lastScanTime: null, qualityScore: 0, totalIssues: 0, criticalIssues: 0, status: 'disconnected' },
-  { id: 'p6', name: 'Echo 消息队列', repoUrl: 'https://github.com/team/echo-mq', branch: 'develop', lastScanTime: '2026-06-13T10:45:00', qualityScore: 78, totalIssues: 19, criticalIssues: 3, status: 'connected' },
+  { id: 'p1', name: 'NovaPay 支付网关', repoUrl: 'https://github.com/team/novapay-gateway', branch: 'main', lastScanTime: '2026-06-13T08:30:00', qualityScore: 87, totalIssues: 12, criticalIssues: 1, status: 'connected', groupId: 'g1' },
+  { id: 'p2', name: 'Atlas 数据平台', repoUrl: 'https://github.com/team/atlas-platform', branch: 'develop', lastScanTime: '2026-06-12T14:20:00', qualityScore: 72, totalIssues: 34, criticalIssues: 5, status: 'connected', groupId: 'g2' },
+  { id: 'p3', name: 'Meridian 用户中心', repoUrl: 'https://github.com/team/meridian-user', branch: 'main', lastScanTime: '2026-06-13T06:00:00', qualityScore: 91, totalIssues: 6, criticalIssues: 0, status: 'connected', groupId: 'g3' },
+  { id: 'p4', name: 'Horizon 运维工具', repoUrl: 'https://github.com/team/horizon-ops', branch: 'release/2.3', lastScanTime: '2026-06-11T20:15:00', qualityScore: 63, totalIssues: 48, criticalIssues: 8, status: 'connected', groupId: 'g3' },
+  { id: 'p5', name: 'Pulse 监控服务', repoUrl: 'https://github.com/team/pulse-monitor', branch: 'main', lastScanTime: null, qualityScore: 0, totalIssues: 0, criticalIssues: 0, status: 'disconnected', groupId: 'g3' },
+  { id: 'p6', name: 'Echo 消息队列', repoUrl: 'https://github.com/team/echo-mq', branch: 'develop', lastScanTime: '2026-06-13T10:45:00', qualityScore: 78, totalIssues: 19, criticalIssues: 3, status: 'connected', groupId: 'g1' },
 ];
 
 const INITIAL_SCAN_RECORDS: ScanRecord[] = [
   { id: 's1', projectId: 'p1', startTime: '2026-06-13T08:30:00', endTime: '2026-06-13T08:35:00', status: 'completed', results: { duplicateCodeRate: 4.2, cyclomaticComplexity: 12, defectRiskCount: 3, dependencyVulnerabilities: 2, testCoverage: 82.5 } },
+  { id: 's1h1', projectId: 'p1', startTime: '2026-06-11T08:30:00', endTime: '2026-06-11T08:34:00', status: 'completed', results: { duplicateCodeRate: 4.8, cyclomaticComplexity: 13, defectRiskCount: 4, dependencyVulnerabilities: 3, testCoverage: 80.2 } },
+  { id: 's1h2', projectId: 'p1', startTime: '2026-06-09T08:30:00', endTime: '2026-06-09T08:36:00', status: 'completed', results: { duplicateCodeRate: 5.3, cyclomaticComplexity: 14, defectRiskCount: 5, dependencyVulnerabilities: 3, testCoverage: 78.5 } },
+  { id: 's1h3', projectId: 'p1', startTime: '2026-06-07T08:30:00', endTime: '2026-06-07T08:35:00', status: 'completed', results: { duplicateCodeRate: 5.8, cyclomaticComplexity: 15, defectRiskCount: 6, dependencyVulnerabilities: 4, testCoverage: 76.0 } },
+  { id: 's1h4', projectId: 'p1', startTime: '2026-06-05T08:30:00', endTime: '2026-06-05T08:37:00', status: 'completed', results: { duplicateCodeRate: 6.2, cyclomaticComplexity: 16, defectRiskCount: 7, dependencyVulnerabilities: 5, testCoverage: 74.3 } },
+
   { id: 's2', projectId: 'p2', startTime: '2026-06-12T14:20:00', endTime: '2026-06-12T14:28:00', status: 'completed', results: { duplicateCodeRate: 11.8, cyclomaticComplexity: 24, defectRiskCount: 12, dependencyVulnerabilities: 8, testCoverage: 56.3 } },
+  { id: 's2h1', projectId: 'p2', startTime: '2026-06-09T14:00:00', endTime: '2026-06-09T14:09:00', status: 'completed', results: { duplicateCodeRate: 12.5, cyclomaticComplexity: 26, defectRiskCount: 14, dependencyVulnerabilities: 9, testCoverage: 54.1 } },
+  { id: 's2h2', projectId: 'p2', startTime: '2026-06-05T14:00:00', endTime: '2026-06-05T14:10:00', status: 'completed', results: { duplicateCodeRate: 13.2, cyclomaticComplexity: 28, defectRiskCount: 16, dependencyVulnerabilities: 11, testCoverage: 51.8 } },
+
   { id: 's3', projectId: 'p3', startTime: '2026-06-13T06:00:00', endTime: '2026-06-13T06:04:00', status: 'completed', results: { duplicateCodeRate: 2.1, cyclomaticComplexity: 8, defectRiskCount: 1, dependencyVulnerabilities: 1, testCoverage: 93.7 } },
+  { id: 's3h1', projectId: 'p3', startTime: '2026-06-10T06:00:00', endTime: '2026-06-10T06:04:00', status: 'completed', results: { duplicateCodeRate: 2.5, cyclomaticComplexity: 9, defectRiskCount: 2, dependencyVulnerabilities: 1, testCoverage: 92.1 } },
+  { id: 's3h2', projectId: 'p3', startTime: '2026-06-07T06:00:00', endTime: '2026-06-07T06:03:00', status: 'completed', results: { duplicateCodeRate: 2.8, cyclomaticComplexity: 9, defectRiskCount: 2, dependencyVulnerabilities: 2, testCoverage: 91.0 } },
+
   { id: 's4', projectId: 'p4', startTime: '2026-06-11T20:15:00', endTime: '2026-06-11T20:25:00', status: 'completed', results: { duplicateCodeRate: 18.5, cyclomaticComplexity: 32, defectRiskCount: 18, dependencyVulnerabilities: 14, testCoverage: 41.2 } },
+  { id: 's4h1', projectId: 'p4', startTime: '2026-06-08T20:00:00', endTime: '2026-06-08T20:12:00', status: 'completed', results: { duplicateCodeRate: 17.2, cyclomaticComplexity: 30, defectRiskCount: 16, dependencyVulnerabilities: 12, testCoverage: 43.5 } },
+
   { id: 's6', projectId: 'p6', startTime: '2026-06-13T10:45:00', endTime: '2026-06-13T10:52:00', status: 'completed', results: { duplicateCodeRate: 6.8, cyclomaticComplexity: 16, defectRiskCount: 5, dependencyVulnerabilities: 3, testCoverage: 72.4 } },
+  { id: 's6h1', projectId: 'p6', startTime: '2026-06-10T10:00:00', endTime: '2026-06-10T10:08:00', status: 'completed', results: { duplicateCodeRate: 7.5, cyclomaticComplexity: 18, defectRiskCount: 7, dependencyVulnerabilities: 4, testCoverage: 70.1 } },
 ];
 
 const INITIAL_SCAN_SCHEDULES: ScanSchedule[] = [
@@ -346,6 +367,7 @@ const INITIAL_PLANS: ImprovementPlan[] = [
 
 interface PersistedState {
   projects: Project[];
+  projectGroups: ProjectGroup[];
   scanRecords: ScanRecord[];
   scanSchedules: ScanSchedule[];
   issues: Issue[];
@@ -364,7 +386,7 @@ interface AppState extends PersistedState {
   triggerScan: (projectId: string) => void;
   updateIssue: (id: string, updates: Partial<Issue>) => void;
   updateRuleConfig: (projectId: string, checkId: string, updates: Partial<{ enabled: boolean; threshold: number }>) => void;
-  addPlan: (plan: Omit<ImprovementPlan, 'id' | 'createdAt' | 'completedIssueIds' | 'milestones'>) => void;
+  addPlan: (plan: Omit<ImprovementPlan, 'id' | 'createdAt' | 'completedIssueIds'> & { milestones?: PlanMilestone[] }) => void;
   completePlanIssue: (planId: string, issueId: string) => void;
   updateScanSchedule: (projectId: string, updates: Partial<ScanSchedule>) => void;
   getOrCreateRuleConfig: (projectId: string) => RuleConfig;
@@ -375,10 +397,13 @@ interface AppState extends PersistedState {
   addPlanMilestone: (planId: string, milestone: Omit<PlanMilestone, 'id'>) => void;
   updatePlanMilestone: (planId: string, milestoneId: string, updates: Partial<PlanMilestone>) => void;
   deletePlanMilestone: (planId: string, milestoneId: string) => void;
+  addIssueToMilestone: (planId: string, milestoneId: string, issueId: string) => void;
+  removeIssueFromMilestone: (planId: string, milestoneId: string, issueId: string) => void;
 }
 
 const initialState: PersistedState = {
   projects: INITIAL_PROJECTS,
+  projectGroups: INITIAL_PROJECT_GROUPS,
   scanRecords: INITIAL_SCAN_RECORDS,
   scanSchedules: INITIAL_SCAN_SCHEDULES,
   issues: INITIAL_ISSUES,
@@ -420,6 +445,7 @@ export const useStore = create<AppState>()(
           qualityScore: 0,
           totalIssues: 0,
           criticalIssues: 0,
+          groupId: project.groupId || 'g3',
         };
         set((state) => ({
           projects: [...state.projects, newProject],
@@ -524,7 +550,7 @@ export const useStore = create<AppState>()(
           id: `pl${Date.now()}`,
           completedIssueIds: [],
           createdAt: new Date().toISOString(),
-          milestones: [],
+          milestones: plan.milestones || [],
         }],
       })),
 
@@ -625,12 +651,43 @@ export const useStore = create<AppState>()(
             : plan
         ),
       })),
+
+      addIssueToMilestone: (planId, milestoneId, issueId) => set((state) => ({
+        plans: state.plans.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                milestones: plan.milestones.map((m) =>
+                  m.id === milestoneId && !m.issueIds.includes(issueId)
+                    ? { ...m, issueIds: [...m.issueIds, issueId] }
+                    : m
+                ),
+              }
+            : plan
+        ),
+      })),
+
+      removeIssueFromMilestone: (planId, milestoneId, issueId) => set((state) => ({
+        plans: state.plans.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                milestones: plan.milestones.map((m) =>
+                  m.id === milestoneId
+                    ? { ...m, issueIds: m.issueIds.filter((id) => id !== issueId) }
+                    : m
+                ),
+              }
+            : plan
+        ),
+      })),
     }),
     {
       name: STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         projects: state.projects,
+        projectGroups: state.projectGroups,
         scanRecords: state.scanRecords,
         scanSchedules: state.scanSchedules,
         issues: state.issues,
@@ -638,6 +695,24 @@ export const useStore = create<AppState>()(
         plans: state.plans,
         ruleTemplates: state.ruleTemplates,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        if (!state.projectGroups || state.projectGroups.length === 0) {
+          state.projectGroups = INITIAL_PROJECT_GROUPS;
+        }
+        if (state.projects) {
+          const defaultGroupForName = (name: string): string => {
+            if (/支付|交易|清结算|NovaPay|Echo/i.test(name)) return 'g1';
+            if (/数据|Atlas/i.test(name)) return 'g2';
+            return 'g3';
+          };
+          (state.projects as Project[]).forEach((p) => {
+            if (!(p as any).groupId) {
+              (p as any).groupId = defaultGroupForName(p.name);
+            }
+          });
+        }
+      },
     }
   )
 );

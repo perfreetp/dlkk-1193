@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Copy, GitBranch, Bug, Shield, TestTube, ChevronDown, Terminal, ArrowLeft, Check, X, BarChart3, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { AreaChart, ResponsiveContainer, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend } from 'recharts';
 import { useStore } from '@/store/useStore';
@@ -57,9 +57,29 @@ function MetricRing({ value, maxVal, invert, color, size = 72 }: { value: number
 export default function ScanResultsPanel({ selectedProjectId, onSelectProject, onGoToConsole }: ScanResultsPanelProps) {
   const { projects, scanRecords, getOrCreateRuleConfig, issues } = useStore();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [viewMode, setViewMode] = useState<'single' | 'compare'>('single');
-  const [compareProjects, setCompareProjects] = useState<string[]>([]);
+
+  const initialCompare = useMemo(() => {
+    const compareParam = searchParams.get('compare');
+    if (compareParam) {
+      return compareParam.split(',').filter(Boolean);
+    }
+    return [];
+  }, []);
+
+  const [compareProjects, setCompareProjects] = useState<string[]>(initialCompare);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    if (compareProjects.length > 0) {
+      params.set('compare', compareProjects.join(','));
+    } else {
+      params.delete('compare');
+    }
+    setSearchParams(params, { replace: true });
+  }, [compareProjects]);
 
   const connectedProjects = projects.filter((p) => p.status === 'connected' || p.status === 'scanning');
 
@@ -145,18 +165,33 @@ export default function ScanResultsPanel({ selectedProjectId, onSelectProject, o
         }
       });
 
+      const score = p?.qualityScore ?? 0;
+      const compositeScore = criticalCount * 5 + exceedingCount * 2 + (100 - score) / 10 + projectIssues.length * 0.5;
+
+      let advice: { text: string; color: string }[] = [];
+      if (criticalCount > 0) {
+        advice.push({ text: `存在 ${criticalCount} 个严重风险，需立即修复`, color: 'text-red-400' });
+      }
+      if (exceedingCount > 0) {
+        advice.push({ text: `${exceedingCount} 项指标超出阈值，建议优先处理`, color: 'text-amber-400' });
+      }
+      if (score < 70) {
+        advice.push({ text: `整体质量偏低（${score}分），需系统性改进`, color: 'text-yellow-400' });
+      }
+      if (advice.length === 0) {
+        advice.push({ text: '当前状态良好', color: 'text-emerald-400' });
+      }
+
       return {
         project: p,
-        score: p?.qualityScore ?? 0,
+        score,
         criticalCount,
         exceedingCount,
         issuesCount: projectIssues.length,
+        compositeScore,
+        advice,
       };
-    }).sort((a, b) => {
-      if (a.criticalCount !== b.criticalCount) return b.criticalCount - a.criticalCount;
-      if (a.exceedingCount !== b.exceedingCount) return b.exceedingCount - a.exceedingCount;
-      return a.score - b.score;
-    });
+    }).sort((a, b) => b.compositeScore - a.compositeScore);
   }, [compareProjects, selectedProjectId, projects, scanRecords, issues, getOrCreateRuleConfig]);
 
   const isExceeding = (metric: MetricConfig): boolean => {
@@ -168,8 +203,13 @@ export default function ScanResultsPanel({ selectedProjectId, onSelectProject, o
     return val > check.threshold;
   };
 
-  const goToIssues = (projectId: string, category: string) => {
-    navigate(`/issues?project=${projectId}&category=${category}`);
+  const goToIssues = (projectId: string, category?: string, severity?: string) => {
+    const params = new URLSearchParams();
+    params.set('project', projectId);
+    if (category) params.set('category', category);
+    if (severity) params.set('severity', severity);
+    if (compareProjects.length > 0) params.set('compare', compareProjects.join(','));
+    navigate(`/issues?${params.toString()}`);
   };
 
   return (
@@ -262,29 +302,52 @@ export default function ScanResultsPanel({ selectedProjectId, onSelectProject, o
             <AlertTriangle className="w-5 h-5 text-amber-400" />
             <h3 className="font-display font-semibold text-amber-400">优先处理建议</h3>
           </div>
-          <div className="space-y-2">
-            {compareSummary.slice(0, 1).map(({ project, score, criticalCount, exceedingCount, issuesCount }) => (
-              <div key={project?.id} className="flex items-center gap-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-surface-200">{project?.name}</p>
-                  <p className="text-xs text-surface-500 mt-0.5">质量评分 {score} · {issuesCount} 未处理问题</p>
+          <div className="space-y-3">
+            {compareSummary.map(({ project, score, criticalCount, exceedingCount, issuesCount, advice }, idx) => (
+              <div
+                key={project?.id}
+                className={`p-4 rounded-lg border ${
+                  idx === 0
+                    ? 'bg-amber-500/10 border-amber-500/30'
+                    : 'bg-surface-800/50 border-surface-700/50'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-medium text-surface-500">#{idx + 1}</span>
+                      <p className="text-sm font-medium text-surface-200">{project?.name}</p>
+                    </div>
+                    <p className="text-xs text-surface-500 mb-2">质量评分 {score} · {issuesCount} 未处理问题</p>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {advice.map((a, i) => (
+                        <span key={i} className={`text-xs ${a.color} flex items-center gap-1`}>
+                          {a.color.includes('red') && <AlertTriangle className="w-3 h-3" />}
+                          {a.color.includes('amber') && <BarChart3 className="w-3 h-3" />}
+                          {a.color.includes('yellow') && <TrendingDown className="w-3 h-3" />}
+                          {a.color.includes('emerald') && <TrendingUp className="w-3 h-3" />}
+                          {a.text}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-4 text-xs">
+                      <span className="flex items-center gap-1 text-red-400">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        {criticalCount} 严重
+                      </span>
+                      <span className="flex items-center gap-1 text-amber-400">
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        {exceedingCount} 项超标
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => goToIssues(project!.id, undefined, 'critical')}
+                    className="btn-primary text-xs py-1.5 px-3 whitespace-nowrap"
+                  >
+                    查看该项目严重问题
+                  </button>
                 </div>
-                <div className="flex items-center gap-4 text-xs">
-                  <span className="flex items-center gap-1 text-red-400">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    {criticalCount} 严重
-                  </span>
-                  <span className="flex items-center gap-1 text-amber-400">
-                    <BarChart3 className="w-3.5 h-3.5" />
-                    {exceedingCount} 项超标
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate(`/projects/${project?.id}`)}
-                  className="btn-primary text-xs py-1.5 px-3"
-                >
-                  查看详情
-                </button>
               </div>
             ))}
           </div>
@@ -328,7 +391,7 @@ export default function ScanResultsPanel({ selectedProjectId, onSelectProject, o
                             exceed ? 'text-red-400' : ''
                           }`}
                           style={{ color: exceed ? undefined : PROJECT_COLORS[j % PROJECT_COLORS.length] }}
-                          onClick={() => goToIssues(pid, metric.category)}
+                          onClick={() => goToIssues(pid, metric.category, exceed ? 'critical' : undefined)}
                         >
                           <span className="flex items-center justify-end gap-1">
                             {val}{row.unit}
@@ -350,17 +413,21 @@ export default function ScanResultsPanel({ selectedProjectId, onSelectProject, o
                     );
                   })}
                 </tr>
-                <tr className="border-b border-surface-700/30 bg-surface-800/20">
+                <tr className="border-b border-surface-700/30 bg-surface-800/20 hover:bg-surface-800/40">
                   <td className="px-4 py-3 text-surface-300 font-medium">严重问题</td>
                   {(compareProjects.length > 0 ? compareProjects : [selectedProjectId]).map((pid, j) => {
                     const summary = compareSummary.find((s) => s.project?.id === pid);
                     return (
                       <td
                         key={pid}
-                        className={`px-4 py-3 text-right font-semibold ${(summary?.criticalCount ?? 0) > 0 ? 'text-red-400' : ''}`}
+                        className={`px-4 py-3 text-right font-semibold cursor-pointer transition-colors ${(summary?.criticalCount ?? 0) > 0 ? 'text-red-400' : ''}`}
                         style={{ color: (summary?.criticalCount ?? 0) > 0 ? undefined : PROJECT_COLORS[j % PROJECT_COLORS.length] }}
+                        onClick={() => goToIssues(pid, undefined, 'critical')}
                       >
-                        {summary?.criticalCount ?? 0}
+                        <span className="flex items-center justify-end gap-1">
+                          {summary?.criticalCount ?? 0}
+                          {(summary?.criticalCount ?? 0) > 0 && <AlertTriangle className="w-3 h-3" />}
+                        </span>
                       </td>
                     );
                   })}

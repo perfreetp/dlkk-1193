@@ -38,19 +38,22 @@ const SEVERITY_OPTIONS: { value: SeverityLevel; label: string }[] = [
 const PAGE_SIZE = 10;
 
 export default function Issues() {
-  const { issues, projects, teamMembers } = useStore();
+  const { issues, projects, teamMembers, projectGroups } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const urlProject = searchParams.get('project') || '';
   const urlCategory = searchParams.get('category') || '';
   const urlSeverity = searchParams.get('severity') || '';
   const urlId = searchParams.get('id') || '';
+  const urlAssignee = searchParams.get('assignee') || '';
+  const urlGroup = searchParams.get('group') || '';
 
   const [projectFilter, setProjectFilter] = useState(urlProject);
-  const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState(urlAssignee);
   const [severityFilter, setSeverityFilter] = useState(urlSeverity);
   const [categoryFilter, setCategoryFilter] = useState(urlCategory);
   const [filePathFilter, setFilePathFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState(urlGroup);
   const [page, setPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -59,8 +62,10 @@ export default function Issues() {
     setProjectFilter(urlProject);
     setSeverityFilter(urlSeverity);
     setCategoryFilter(urlCategory);
+    setAssigneeFilter(urlAssignee);
+    setGroupFilter(urlGroup);
     setPage(1);
-  }, [urlProject, urlSeverity, urlCategory]);
+  }, [urlProject, urlSeverity, urlCategory, urlAssignee, urlGroup]);
 
   useEffect(() => {
     if (urlId) {
@@ -82,22 +87,33 @@ export default function Issues() {
     setSearchParams(params);
   };
 
+  const groupProjectIds = useMemo(() => {
+    if (!groupFilter) return null;
+    return projects.filter((p) => p.groupId === groupFilter).map((p) => p.id);
+  }, [groupFilter, projects]);
+
   const filtered = useMemo(() => {
     return issues.filter((issue) => {
       if (projectFilter && issue.projectId !== projectFilter) return false;
+      if (groupProjectIds && !groupProjectIds.includes(issue.projectId)) return false;
       if (assigneeFilter && issue.assignee !== assigneeFilter) return false;
       if (severityFilter && issue.severity !== severityFilter) return false;
       if (categoryFilter && issue.category !== categoryFilter) return false;
       if (filePathFilter && !issue.filePath.toLowerCase().includes(filePathFilter.toLowerCase())) return false;
       return true;
     });
-  }, [issues, projectFilter, assigneeFilter, severityFilter, categoryFilter, filePathFilter]);
+  }, [issues, projectFilter, groupProjectIds, assigneeFilter, severityFilter, categoryFilter, filePathFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const activeFilters = [
+    {
+      key: 'group',
+      label: groupFilter ? `项目组: ${projectGroups.find((g) => g.id === groupFilter)?.name ?? ''}` : '',
+      clear: () => { setGroupFilter(''); updateUrlParam('group', ''); setPage(1); },
+    },
     {
       key: 'project',
       label: projectFilter ? projects.find((p) => p.id === projectFilter)?.name ?? '' : '',
@@ -111,7 +127,7 @@ export default function Issues() {
     {
       key: 'assignee',
       label: assigneeFilter ? `负责人: ${assigneeFilter}` : '',
-      clear: () => { setAssigneeFilter(''); setPage(1); },
+      clear: () => { setAssigneeFilter(''); updateUrlParam('assignee', ''); setPage(1); },
     },
     {
       key: 'severity',
@@ -182,12 +198,23 @@ export default function Issues() {
 
           <select
             value={assigneeFilter}
-            onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1); }}
+            onChange={(e) => { setAssigneeFilter(e.target.value); updateUrlParam('assignee', e.target.value); setPage(1); }}
             className={selectCls}
           >
             <option value="">全部负责人</option>
             {teamMembers.map((m) => (
               <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+
+          <select
+            value={groupFilter}
+            onChange={(e) => { setGroupFilter(e.target.value); updateUrlParam('group', e.target.value); setProjectFilter(''); updateUrlParam('project', ''); setPage(1); }}
+            className={selectCls}
+          >
+            <option value="">全部项目组</option>
+            {projectGroups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
             ))}
           </select>
 
@@ -230,6 +257,7 @@ export default function Issues() {
             <button
               onClick={() => {
                 setProjectFilter('');
+                setGroupFilter('');
                 setAssigneeFilter('');
                 setSeverityFilter('');
                 setCategoryFilter('');

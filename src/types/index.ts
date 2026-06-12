@@ -14,6 +14,14 @@ export interface Project {
   totalIssues: number;
   criticalIssues: number;
   status: ProjectStatus;
+  groupId: string;
+}
+
+export interface ProjectGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
 }
 
 export interface ScanRecord {
