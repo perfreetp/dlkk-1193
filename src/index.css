@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #0F172A;
+  color: #E2E8F0;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1E293B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748B;
+}
+
+@layer components {
+  .card-glow {
+    @apply border border-surface-700/50 bg-surface-800/80 backdrop-blur-sm transition-all duration-300;
+  }
+  .card-glow:hover {
+    @apply border-brand-500/30;
+    box-shadow: 0 0 20px rgba(6, 214, 160, 0.1), 0 0 40px rgba(6, 214, 160, 0.05);
+  }
+  .btn-primary {
+    @apply bg-brand-500 text-surface-900 font-semibold px-4 py-2 rounded-lg transition-all duration-200 hover:bg-brand-400 hover:shadow-lg hover:shadow-brand-500/25 active:scale-95;
+  }
+  .btn-ghost {
+    @apply text-surface-400 px-4 py-2 rounded-lg transition-all duration-200 hover:text-surface-200 hover:bg-surface-700/50;
+  }
+  .stat-number {
+    @apply font-display font-extrabold tabular-nums;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+  }
+  .badge-critical {
+    @apply badge bg-red-500/15 text-red-400 border border-red-500/30;
+  }
+  .badge-high {
+    @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/30;
+  }
+  .badge-medium {
+    @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/30;
+  }
+  .badge-low {
+    @apply badge bg-gray-500/15 text-gray-400 border border-gray-500/30;
+  }
+}
+
+@keyframes scoreReveal {
+  from { stroke-dashoffset: 283; }
+}
+
+.score-circle {
+  animation: scoreReveal 1.2s ease-out forwards;
+}
