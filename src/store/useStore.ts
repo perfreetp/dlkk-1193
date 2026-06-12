@@ -1,32 +1,235 @@
 import { create } from 'zustand';
-import type { Project, ScanRecord, ScanSchedule, Issue, RuleConfig, ImprovementPlan, TeamRanking, TrendDataPoint } from '@/types';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type {
+  Project,
+  ScanRecord,
+  ScanSchedule,
+  Issue,
+  RuleConfig,
+  ImprovementPlan,
+  TeamRanking,
+  TrendDataPoint,
+  ScanResults,
+  IssueCategory,
+  SeverityLevel,
+} from '@/types';
 
-const PROJECTS: Project[] = [
+const STORAGE_KEY = 'code-quality-center-v1';
+
+const TEAM_MEMBERS = ['张明', '李芳', '王磊', '赵雪', '陈浩', '刘洋', '孙强', '周婷'];
+
+const TEAM_RANKINGS: TeamRanking[] = [
+  { member: '张明', avatar: 'ZM', qualityScore: 92, resolvedCount: 18, openIssueCount: 2, avgResolutionDays: 2.3 },
+  { member: '赵雪', avatar: 'ZX', qualityScore: 88, resolvedCount: 14, openIssueCount: 3, avgResolutionDays: 3.1 },
+  { member: '陈浩', avatar: 'CH', qualityScore: 85, resolvedCount: 12, openIssueCount: 1, avgResolutionDays: 2.8 },
+  { member: '李芳', avatar: 'LF', qualityScore: 82, resolvedCount: 10, openIssueCount: 4, avgResolutionDays: 3.5 },
+  { member: '王磊', avatar: 'WL', qualityScore: 78, resolvedCount: 8, openIssueCount: 5, avgResolutionDays: 4.2 },
+  { member: '刘洋', avatar: 'LY', qualityScore: 75, resolvedCount: 6, openIssueCount: 3, avgResolutionDays: 5.0 },
+  { member: '孙强', avatar: 'SQ', qualityScore: 71, resolvedCount: 5, openIssueCount: 4, avgResolutionDays: 5.8 },
+  { member: '周婷', avatar: 'ZT', qualityScore: 68, resolvedCount: 3, openIssueCount: 6, avgResolutionDays: 7.2 },
+];
+
+const QUALITY_TREND: TrendDataPoint[] = [
+  { date: '05-19', value: 71 }, { date: '05-22', value: 73 }, { date: '05-25', value: 72 },
+  { date: '05-28', value: 75 }, { date: '05-31', value: 77 }, { date: '06-03', value: 76 },
+  { date: '06-06', value: 79 }, { date: '06-09', value: 78 }, { date: '06-12', value: 80 },
+  { date: '06-13', value: 81 },
+];
+
+const ISSUE_TREND: TrendDataPoint[] = [
+  { date: '05-19', value: 45 }, { date: '05-22', value: 52 }, { date: '05-25', value: 48 },
+  { date: '05-28', value: 55 }, { date: '05-31', value: 50 }, { date: '06-03', value: 47 },
+  { date: '06-06', value: 43 }, { date: '06-09', value: 38 }, { date: '06-12', value: 35 },
+  { date: '06-13', value: 32 },
+];
+
+function calculateQualityScore(r: ScanResults): number {
+  const score =
+    r.testCoverage * 0.3 +
+    Math.max(0, 100 - r.duplicateCodeRate * 5) * 0.2 +
+    Math.max(0, 100 - r.cyclomaticComplexity * 2) * 0.2 +
+    Math.max(0, 100 - r.defectRiskCount * 5) * 0.15 +
+    Math.max(0, 100 - r.dependencyVulnerabilities * 5) * 0.15;
+  return Math.round(Math.min(100, Math.max(0, score)));
+}
+
+function generateMockScanResults(qualityLevel: 'high' | 'mid' | 'low' = 'mid'): ScanResults {
+  const ranges = {
+    high: { dup: [1, 5], comp: [5, 12], defect: [0, 3], vuln: [0, 2], cov: [80, 95] },
+    mid: { dup: [5, 12], comp: [10, 25], defect: [3, 10], vuln: [2, 6], cov: [55, 78] },
+    low: { dup: [12, 22], comp: [20, 35], defect: [10, 20], vuln: [6, 15], cov: [30, 55] },
+  };
+  const r = ranges[qualityLevel];
+  const rand = (min: number, max: number) => Math.random() * (max - min) + min;
+  const dup = +rand(r.dup[0], r.dup[1]).toFixed(1);
+  const comp = Math.round(rand(r.comp[0], r.comp[1]));
+  const defect = Math.round(rand(r.defect[0], r.defect[1]));
+  const vuln = Math.round(rand(r.vuln[0], r.vuln[1]));
+  const cov = +rand(r.cov[0], r.cov[1]).toFixed(1);
+  return {
+    duplicateCodeRate: dup,
+    cyclomaticComplexity: comp,
+    defectRiskCount: defect,
+    dependencyVulnerabilities: vuln,
+    testCoverage: cov,
+  };
+}
+
+const ISSUE_TEMPLATES: Record<IssueCategory, { titles: string[]; descriptions: string[]; filePaths: string[] }> = {
+  duplicate: {
+    titles: ['模块存在重复代码', '工具函数重复实现', '格式转换逻辑重复', '配置解析代码重复', '错误处理逻辑重复'],
+    descriptions: [
+      '两个模块中存在高度相似的代码段，建议提取公共方法',
+      '相似逻辑重复出现在多个文件中，应抽象为公共工具',
+      '代码重复率超过阈值，影响可维护性',
+    ],
+    filePaths: ['src/utils/helpers.ts', 'src/services/common.ts', 'src/components/Shared.tsx', 'src/lib/format.ts'],
+  },
+  complexity: {
+    titles: ['函数圈复杂度过高', '条件分支过多', '嵌套层级太深', '巨型函数需拆分', '状态机逻辑复杂'],
+    descriptions: [
+      '函数包含大量嵌套条件分支，建议使用策略模式重构',
+      '圈复杂度远超阈值，增加测试和维护难度',
+      '函数过长且分支复杂，应拆分为多个子函数',
+    ],
+    filePaths: ['src/core/engine.ts', 'src/parser/ConfigParser.ts', 'src/query/QueryBuilder.ts', 'src/handler/EventDispatcher.ts'],
+  },
+  defect: {
+    titles: ['资源未正确释放', '空指针风险', '边界条件未处理', '并发安全问题', '异常被静默吞掉'],
+    descriptions: [
+      '异常路径下资源可能泄漏，需补充清理逻辑',
+      '缺少空值检查，运行时存在崩溃风险',
+      '边界条件考虑不周，可能导致越界或死循环',
+    ],
+    filePaths: ['src/db/ConnectionPool.ts', 'src/io/StreamReader.ts', 'src/concurrent/TaskQueue.ts', 'src/handler/RequestProcessor.ts'],
+  },
+  vulnerability: {
+    titles: ['依赖存在已知漏洞', '输入校验不足', '敏感信息泄露', 'SQL注入风险', 'XSS攻击风险'],
+    descriptions: [
+      '第三方依赖版本存在安全漏洞，需及时升级',
+      '外部输入未经过充分校验，存在安全隐患',
+      '敏感数据可能在日志或错误信息中泄露',
+    ],
+    filePaths: ['package.json', 'src/auth/AuthService.ts', 'src/security/Sanitizer.ts', 'src/db/QueryBuilder.ts'],
+  },
+  coverage: {
+    titles: ['核心模块测试覆盖率不足', '关键路径缺少测试', '异常分支未覆盖', '边界用例缺失', '集成测试缺失'],
+    descriptions: [
+      '核心业务逻辑测试覆盖率低于要求标准',
+      '关键异常路径缺少单元测试',
+      '边界条件和错误处理场景未被测试覆盖',
+    ],
+    filePaths: ['src/core/', 'src/services/', 'src/domain/', 'src/infra/'],
+  },
+};
+
+function generateIssuesFromResults(results: ScanResults, projectId: string, projectName: string): Issue[] {
+  const issues: Issue[] = [];
+  const categories: { cat: IssueCategory; count: number }[] = [
+    { cat: 'defect', count: results.defectRiskCount },
+    { cat: 'vulnerability', count: results.dependencyVulnerabilities },
+    { cat: 'duplicate', count: Math.ceil(results.duplicateCodeRate / 2) },
+    { cat: 'complexity', count: Math.ceil(results.cyclomaticComplexity / 5) },
+    { cat: 'coverage', count: results.testCoverage < 70 ? 2 : results.testCoverage < 85 ? 1 : 0 },
+  ];
+
+  const now = new Date();
+  let issueIdx = 0;
+
+  categories.forEach(({ cat, count }) => {
+    const templates = ISSUE_TEMPLATES[cat];
+    for (let i = 0; i < count; i++) {
+      const templateIdx = (issueIdx + i) % templates.titles.length;
+      const fileIdx = (issueIdx + i) % templates.filePaths.length;
+      const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+      const severityRoll = Math.random();
+      let severity: SeverityLevel;
+      if (cat === 'vulnerability' || cat === 'defect') {
+        severity = severityRoll < 0.3 ? 'critical' : severityRoll < 0.7 ? 'high' : 'medium';
+      } else if (cat === 'complexity') {
+        severity = severityRoll < 0.15 ? 'high' : severityRoll < 0.6 ? 'medium' : 'low';
+      } else {
+        severity = severityRoll < 0.1 ? 'high' : severityRoll < 0.5 ? 'medium' : 'low';
+      }
+
+      const lineStart = rand(10, 150);
+      const lineEnd = lineStart + rand(10, 50);
+
+      issues.push({
+        id: `i-${projectId}-${Date.now()}-${issueIdx}`,
+        projectId,
+        projectName,
+        title: templates.titles[templateIdx],
+        description: templates.descriptions[templateIdx % templates.descriptions.length],
+        severity,
+        status: 'open',
+        filePath: templates.filePaths[fileIdx],
+        lineStart,
+        lineEnd,
+        assignee: null,
+        dueDate: null,
+        resolution: null,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        category: cat,
+      });
+      issueIdx++;
+    }
+  });
+
+  return issues;
+}
+
+function getDefaultRuleConfig(projectId: string): RuleConfig {
+  return {
+    projectId,
+    checks: [
+      { id: 'c1', name: '重复代码检测', category: 'duplicate', enabled: true, threshold: 8, description: '重复代码率上限（百分比）' },
+      { id: 'c2', name: '圈复杂度检查', category: 'complexity', enabled: true, threshold: 20, description: '单函数最大圈复杂度' },
+      { id: 'c3', name: '缺陷风险扫描', category: 'defect', enabled: true, threshold: 8, description: '缺陷风险最大数量' },
+      { id: 'c4', name: '依赖漏洞检查', category: 'vulnerability', enabled: true, threshold: 5, description: '依赖漏洞最大数量' },
+      { id: 'c5', name: '测试覆盖率检查', category: 'coverage', enabled: true, threshold: 70, description: '最低测试覆盖率（百分比）' },
+    ],
+  };
+}
+
+function getDefaultScanSchedule(projectId: string): ScanSchedule {
+  return {
+    projectId,
+    enabled: false,
+    cron: '0 8 * * 1-5',
+    nextRun: '',
+  };
+}
+
+const INITIAL_PROJECTS: Project[] = [
   { id: 'p1', name: 'NovaPay 支付网关', repoUrl: 'https://github.com/team/novapay-gateway', branch: 'main', lastScanTime: '2026-06-13T08:30:00', qualityScore: 87, totalIssues: 12, criticalIssues: 1, status: 'connected' },
   { id: 'p2', name: 'Atlas 数据平台', repoUrl: 'https://github.com/team/atlas-platform', branch: 'develop', lastScanTime: '2026-06-12T14:20:00', qualityScore: 72, totalIssues: 34, criticalIssues: 5, status: 'connected' },
   { id: 'p3', name: 'Meridian 用户中心', repoUrl: 'https://github.com/team/meridian-user', branch: 'main', lastScanTime: '2026-06-13T06:00:00', qualityScore: 91, totalIssues: 6, criticalIssues: 0, status: 'connected' },
   { id: 'p4', name: 'Horizon 运维工具', repoUrl: 'https://github.com/team/horizon-ops', branch: 'release/2.3', lastScanTime: '2026-06-11T20:15:00', qualityScore: 63, totalIssues: 48, criticalIssues: 8, status: 'connected' },
   { id: 'p5', name: 'Pulse 监控服务', repoUrl: 'https://github.com/team/pulse-monitor', branch: 'main', lastScanTime: null, qualityScore: 0, totalIssues: 0, criticalIssues: 0, status: 'disconnected' },
-  { id: 'p6', name: 'Echo 消息队列', repoUrl: 'https://github.com/team/echo-mq', branch: 'develop', lastScanTime: '2026-06-13T10:45:00', qualityScore: 78, totalIssues: 19, criticalIssues: 3, status: 'scanning' },
+  { id: 'p6', name: 'Echo 消息队列', repoUrl: 'https://github.com/team/echo-mq', branch: 'develop', lastScanTime: '2026-06-13T10:45:00', qualityScore: 78, totalIssues: 19, criticalIssues: 3, status: 'connected' },
 ];
 
-const SCAN_RECORDS: ScanRecord[] = [
+const INITIAL_SCAN_RECORDS: ScanRecord[] = [
   { id: 's1', projectId: 'p1', startTime: '2026-06-13T08:30:00', endTime: '2026-06-13T08:35:00', status: 'completed', results: { duplicateCodeRate: 4.2, cyclomaticComplexity: 12, defectRiskCount: 3, dependencyVulnerabilities: 2, testCoverage: 82.5 } },
   { id: 's2', projectId: 'p2', startTime: '2026-06-12T14:20:00', endTime: '2026-06-12T14:28:00', status: 'completed', results: { duplicateCodeRate: 11.8, cyclomaticComplexity: 24, defectRiskCount: 12, dependencyVulnerabilities: 8, testCoverage: 56.3 } },
   { id: 's3', projectId: 'p3', startTime: '2026-06-13T06:00:00', endTime: '2026-06-13T06:04:00', status: 'completed', results: { duplicateCodeRate: 2.1, cyclomaticComplexity: 8, defectRiskCount: 1, dependencyVulnerabilities: 1, testCoverage: 93.7 } },
   { id: 's4', projectId: 'p4', startTime: '2026-06-11T20:15:00', endTime: '2026-06-11T20:25:00', status: 'completed', results: { duplicateCodeRate: 18.5, cyclomaticComplexity: 32, defectRiskCount: 18, dependencyVulnerabilities: 14, testCoverage: 41.2 } },
-  { id: 's5', projectId: 'p6', startTime: '2026-06-13T10:45:00', endTime: null, status: 'running', results: null },
+  { id: 's6', projectId: 'p6', startTime: '2026-06-13T10:45:00', endTime: '2026-06-13T10:52:00', status: 'completed', results: { duplicateCodeRate: 6.8, cyclomaticComplexity: 16, defectRiskCount: 5, dependencyVulnerabilities: 3, testCoverage: 72.4 } },
 ];
 
-const SCAN_SCHEDULES: ScanSchedule[] = [
+const INITIAL_SCAN_SCHEDULES: ScanSchedule[] = [
   { projectId: 'p1', enabled: true, cron: '0 8 * * 1-5', nextRun: '2026-06-14T08:00:00' },
   { projectId: 'p2', enabled: true, cron: '0 14 * * 1', nextRun: '2026-06-15T14:00:00' },
   { projectId: 'p3', enabled: true, cron: '0 6 * * 1-5', nextRun: '2026-06-14T06:00:00' },
   { projectId: 'p4', enabled: false, cron: '', nextRun: '' },
+  { projectId: 'p5', enabled: false, cron: '', nextRun: '' },
   { projectId: 'p6', enabled: true, cron: '0 10 * * 1-5', nextRun: '2026-06-14T10:00:00' },
 ];
 
-const ISSUES: Issue[] = [
+const INITIAL_ISSUES: Issue[] = [
   { id: 'i1', projectId: 'p1', projectName: 'NovaPay 支付网关', title: '支付回调处理缺少幂等校验', description: 'PaymentCallbackHandler.process() 方法在处理重复回调时可能导致重复入账，需要增加幂等性检查。', severity: 'critical', status: 'assigned', filePath: 'src/services/PaymentCallbackHandler.ts', lineStart: 45, lineEnd: 67, assignee: '张明', dueDate: '2026-06-15', resolution: null, createdAt: '2026-06-10T10:00:00', updatedAt: '2026-06-11T09:00:00', category: 'defect' },
   { id: 'i2', projectId: 'p2', projectName: 'Atlas 数据平台', title: '数据导出模块重复代码率过高', description: 'CSVExport 和 ExcelExport 两个类有超过 60% 的重复代码，应抽象公共基类。', severity: 'high', status: 'open', filePath: 'src/export/CSVExportService.ts', lineStart: 12, lineEnd: 89, assignee: null, dueDate: null, resolution: null, createdAt: '2026-06-09T14:00:00', updatedAt: '2026-06-09T14:00:00', category: 'duplicate' },
   { id: 'i3', projectId: 'p4', projectName: 'Horizon 运维工具', title: '配置解析函数圈复杂度达 32', description: 'ConfigParser.parse() 方法圈复杂度远超阈值(15)，包含大量嵌套条件分支，严重影响可维护性。', severity: 'high', status: 'in_progress', filePath: 'src/parser/ConfigParser.ts', lineStart: 100, lineEnd: 245, assignee: '王磊', dueDate: '2026-06-18', resolution: null, createdAt: '2026-06-08T16:00:00', updatedAt: '2026-06-12T11:00:00', category: 'complexity' },
@@ -44,7 +247,7 @@ const ISSUES: Issue[] = [
   { id: 'i15', projectId: 'p1', projectName: 'NovaPay 支付网关', title: '签名验证模块测试覆盖率 68%', description: '支付签名验证模块测试覆盖率低于安全模块要求的 90%。', severity: 'medium', status: 'open', filePath: 'src/crypto/SignatureVerifier.ts', lineStart: 1, lineEnd: 1, assignee: null, dueDate: null, resolution: null, createdAt: '2026-06-11T13:00:00', updatedAt: '2026-06-11T13:00:00', category: 'coverage' },
 ];
 
-const RULE_CONFIGS: RuleConfig[] = [
+const INITIAL_RULE_CONFIGS: RuleConfig[] = [
   {
     projectId: 'p1',
     checks: [
@@ -86,6 +289,16 @@ const RULE_CONFIGS: RuleConfig[] = [
     ],
   },
   {
+    projectId: 'p5',
+    checks: [
+      { id: 'c1', name: '重复代码检测', category: 'duplicate', enabled: true, threshold: 8, description: '重复代码率上限（百分比）' },
+      { id: 'c2', name: '圈复杂度检查', category: 'complexity', enabled: true, threshold: 20, description: '单函数最大圈复杂度' },
+      { id: 'c3', name: '缺陷风险扫描', category: 'defect', enabled: true, threshold: 8, description: '缺陷风险最大数量' },
+      { id: 'c4', name: '依赖漏洞检查', category: 'vulnerability', enabled: true, threshold: 5, description: '依赖漏洞最大数量' },
+      { id: 'c5', name: '测试覆盖率检查', category: 'coverage', enabled: true, threshold: 70, description: '最低测试覆盖率（百分比）' },
+    ],
+  },
+  {
     projectId: 'p6',
     checks: [
       { id: 'c1', name: '重复代码检测', category: 'duplicate', enabled: true, threshold: 7, description: '重复代码率上限（百分比）' },
@@ -97,7 +310,7 @@ const RULE_CONFIGS: RuleConfig[] = [
   },
 ];
 
-const PLANS: ImprovementPlan[] = [
+const INITIAL_PLANS: ImprovementPlan[] = [
   {
     id: 'pl1', name: 'Sprint 23 安全加固', description: '修复所有严重依赖漏洞和关键缺陷风险问题', startDate: '2026-06-10', endDate: '2026-06-20', status: 'active',
     issueIds: ['i1', 'i4', 'i6', 'i8', 'i13'], completedIssueIds: [],
@@ -115,40 +328,16 @@ const PLANS: ImprovementPlan[] = [
   },
 ];
 
-const TEAM_MEMBERS = ['张明', '李芳', '王磊', '赵雪', '陈浩', '刘洋', '孙强', '周婷'];
-
-const TEAM_RANKINGS: TeamRanking[] = [
-  { member: '张明', avatar: 'ZM', qualityScore: 92, resolvedCount: 18, openIssueCount: 2, avgResolutionDays: 2.3 },
-  { member: '赵雪', avatar: 'ZX', qualityScore: 88, resolvedCount: 14, openIssueCount: 3, avgResolutionDays: 3.1 },
-  { member: '陈浩', avatar: 'CH', qualityScore: 85, resolvedCount: 12, openIssueCount: 1, avgResolutionDays: 2.8 },
-  { member: '李芳', avatar: 'LF', qualityScore: 82, resolvedCount: 10, openIssueCount: 4, avgResolutionDays: 3.5 },
-  { member: '王磊', avatar: 'WL', qualityScore: 78, resolvedCount: 8, openIssueCount: 5, avgResolutionDays: 4.2 },
-  { member: '刘洋', avatar: 'LY', qualityScore: 75, resolvedCount: 6, openIssueCount: 3, avgResolutionDays: 5.0 },
-  { member: '孙强', avatar: 'SQ', qualityScore: 71, resolvedCount: 5, openIssueCount: 4, avgResolutionDays: 5.8 },
-  { member: '周婷', avatar: 'ZT', qualityScore: 68, resolvedCount: 3, openIssueCount: 6, avgResolutionDays: 7.2 },
-];
-
-const QUALITY_TREND: TrendDataPoint[] = [
-  { date: '05-19', value: 71 }, { date: '05-22', value: 73 }, { date: '05-25', value: 72 },
-  { date: '05-28', value: 75 }, { date: '05-31', value: 77 }, { date: '06-03', value: 76 },
-  { date: '06-06', value: 79 }, { date: '06-09', value: 78 }, { date: '06-12', value: 80 },
-  { date: '06-13', value: 81 },
-];
-
-const ISSUE_TREND: TrendDataPoint[] = [
-  { date: '05-19', value: 45 }, { date: '05-22', value: 52 }, { date: '05-25', value: 48 },
-  { date: '05-28', value: 55 }, { date: '05-31', value: 50 }, { date: '06-03', value: 47 },
-  { date: '06-06', value: 43 }, { date: '06-09', value: 38 }, { date: '06-12', value: 35 },
-  { date: '06-13', value: 32 },
-];
-
-interface AppState {
+interface PersistedState {
   projects: Project[];
   scanRecords: ScanRecord[];
   scanSchedules: ScanSchedule[];
   issues: Issue[];
   ruleConfigs: RuleConfig[];
   plans: ImprovementPlan[];
+}
+
+interface AppState extends PersistedState {
   teamMembers: string[];
   teamRankings: TeamRanking[];
   qualityTrend: TrendDataPoint[];
@@ -161,92 +350,194 @@ interface AppState {
   addPlan: (plan: Omit<ImprovementPlan, 'id' | 'createdAt' | 'completedIssueIds'>) => void;
   completePlanIssue: (planId: string, issueId: string) => void;
   updateScanSchedule: (projectId: string, updates: Partial<ScanSchedule>) => void;
+  getOrCreateRuleConfig: (projectId: string) => RuleConfig;
+  getOrCreateScanSchedule: (projectId: string) => ScanSchedule;
 }
 
-export const useStore = create<AppState>((set) => ({
-  projects: PROJECTS,
-  scanRecords: SCAN_RECORDS,
-  scanSchedules: SCAN_SCHEDULES,
-  issues: ISSUES,
-  ruleConfigs: RULE_CONFIGS,
-  plans: PLANS,
-  teamMembers: TEAM_MEMBERS,
-  teamRankings: TEAM_RANKINGS,
-  qualityTrend: QUALITY_TREND,
-  issueTrend: ISSUE_TREND,
+const initialState: PersistedState = {
+  projects: INITIAL_PROJECTS,
+  scanRecords: INITIAL_SCAN_RECORDS,
+  scanSchedules: INITIAL_SCAN_SCHEDULES,
+  issues: INITIAL_ISSUES,
+  ruleConfigs: INITIAL_RULE_CONFIGS,
+  plans: INITIAL_PLANS,
+};
 
-  addProject: (project) => set((state) => ({
-    projects: [...state.projects, {
-      ...project,
-      id: `p${Date.now()}`,
-      qualityScore: 0,
-      totalIssues: 0,
-      criticalIssues: 0,
-    }],
-  })),
+export const useStore = create<AppState>()(
+  persist(
+    (set, get) => ({
+      ...initialState,
+      teamMembers: TEAM_MEMBERS,
+      teamRankings: TEAM_RANKINGS,
+      qualityTrend: QUALITY_TREND,
+      issueTrend: ISSUE_TREND,
 
-  triggerScan: (projectId) => set((state) => {
-    const project = state.projects.find((p) => p.id === projectId);
-    if (!project) return state;
-    const scanId = `s${Date.now()}`;
-    const newRecord: ScanRecord = {
-      id: scanId,
-      projectId,
-      startTime: new Date().toISOString(),
-      endTime: null,
-      status: 'running',
-      results: null,
-    };
-    return {
-      projects: state.projects.map((p) =>
-        p.id === projectId ? { ...p, status: 'scanning' as const } : p
-      ),
-      scanRecords: [newRecord, ...state.scanRecords],
-    };
-  }),
+      getOrCreateRuleConfig: (projectId: string) => {
+        const existing = get().ruleConfigs.find((c) => c.projectId === projectId);
+        if (existing) return existing;
+        const config = getDefaultRuleConfig(projectId);
+        set((state) => ({ ruleConfigs: [...state.ruleConfigs, config] }));
+        return config;
+      },
 
-  updateIssue: (id, updates) => set((state) => ({
-    issues: state.issues.map((issue) =>
-      issue.id === id ? { ...issue, ...updates, updatedAt: new Date().toISOString() } : issue
-    ),
-  })),
+      getOrCreateScanSchedule: (projectId: string) => {
+        const existing = get().scanSchedules.find((s) => s.projectId === projectId);
+        if (existing) return existing;
+        const schedule = getDefaultScanSchedule(projectId);
+        set((state) => ({ scanSchedules: [...state.scanSchedules, schedule] }));
+        return schedule;
+      },
 
-  updateRuleConfig: (projectId, checkId, updates) => set((state) => ({
-    ruleConfigs: state.ruleConfigs.map((config) =>
-      config.projectId === projectId
-        ? {
-            ...config,
-            checks: config.checks.map((check) =>
-              check.id === checkId ? { ...check, ...updates } : check
+      addProject: (project) => {
+        const id = `p${Date.now()}`;
+        const newProject: Project = {
+          ...project,
+          id,
+          qualityScore: 0,
+          totalIssues: 0,
+          criticalIssues: 0,
+        };
+        set((state) => ({
+          projects: [...state.projects, newProject],
+          ruleConfigs: [...state.ruleConfigs, getDefaultRuleConfig(id)],
+          scanSchedules: [...state.scanSchedules, getDefaultScanSchedule(id)],
+        }));
+      },
+
+      triggerScan: (projectId) => {
+        const state = get();
+        const project = state.projects.find((p) => p.id === projectId);
+        if (!project) return;
+
+        const scanId = `s${Date.now()}`;
+        const startTime = new Date().toISOString();
+        const newRecord: ScanRecord = {
+          id: scanId,
+          projectId,
+          startTime,
+          endTime: null,
+          status: 'running',
+          results: null,
+        };
+
+        set({
+          projects: state.projects.map((p) =>
+            p.id === projectId ? { ...p, status: 'scanning' as const } : p
+          ),
+          scanRecords: [newRecord, ...state.scanRecords],
+        });
+
+        const scanDuration = 3000 + Math.random() * 4000;
+        setTimeout(() => {
+          const s = get();
+          const proj = s.projects.find((p) => p.id === projectId);
+          const qualityLevel: 'high' | 'mid' | 'low' =
+            proj?.qualityScore >= 80 ? 'high' : proj?.qualityScore >= 65 ? 'mid' : 'low';
+
+          const results = generateMockScanResults(qualityLevel);
+          const score = calculateQualityScore(results);
+          const newIssues = generateIssuesFromResults(results, projectId, proj?.name ?? '');
+
+          const existingIssueIds = new Set(s.issues.filter((i) => i.projectId === projectId).map((i) => i.id));
+          const freshIssues = newIssues.filter((i) => !existingIssueIds.has(i.id));
+          const criticalCount = freshIssues.filter((i) => i.severity === 'critical').length;
+
+          set({
+            projects: s.projects.map((p) =>
+              p.id === projectId
+                ? {
+                    ...p,
+                    status: 'connected' as const,
+                    lastScanTime: new Date().toISOString(),
+                    qualityScore: score,
+                    totalIssues: freshIssues.length,
+                    criticalIssues: criticalCount,
+                  }
+                : p
             ),
-          }
-        : config
-    ),
-  })),
+            scanRecords: s.scanRecords.map((r) =>
+              r.id === scanId
+                ? { ...r, status: 'completed' as const, endTime: new Date().toISOString(), results }
+                : r
+            ),
+            issues: [
+              ...freshIssues,
+              ...s.issues.filter((i) => i.projectId !== projectId),
+            ],
+          });
+        }, scanDuration);
+      },
 
-  addPlan: (plan) => set((state) => ({
-    plans: [...state.plans, {
-      ...plan,
-      id: `pl${Date.now()}`,
-      completedIssueIds: [],
-      createdAt: new Date().toISOString(),
-    }],
-  })),
+      updateIssue: (id, updates) => set((state) => ({
+        issues: state.issues.map((issue) =>
+          issue.id === id ? { ...issue, ...updates, updatedAt: new Date().toISOString() } : issue
+        ),
+      })),
 
-  completePlanIssue: (planId, issueId) => set((state) => ({
-    plans: state.plans.map((plan) =>
-      plan.id === planId
-        ? { ...plan, completedIssueIds: [...plan.completedIssueIds, issueId] }
-        : plan
-    ),
-    issues: state.issues.map((issue) =>
-      issue.id === issueId ? { ...issue, status: 'resolved' as const, updatedAt: new Date().toISOString() } : issue
-    ),
-  })),
+      updateRuleConfig: (projectId, checkId, updates) => {
+        const state = get();
+        let configs = state.ruleConfigs;
+        if (!configs.find((c) => c.projectId === projectId)) {
+          configs = [...configs, getDefaultRuleConfig(projectId)];
+        }
+        set({
+          ruleConfigs: configs.map((config) =>
+            config.projectId === projectId
+              ? {
+                  ...config,
+                  checks: config.checks.map((check) =>
+                    check.id === checkId ? { ...check, ...updates } : check
+                  ),
+                }
+              : config
+          ),
+        });
+      },
 
-  updateScanSchedule: (projectId, updates) => set((state) => ({
-    scanSchedules: state.scanSchedules.map((schedule) =>
-      schedule.projectId === projectId ? { ...schedule, ...updates } : schedule
-    ),
-  })),
-}));
+      addPlan: (plan) => set((state) => ({
+        plans: [...state.plans, {
+          ...plan,
+          id: `pl${Date.now()}`,
+          completedIssueIds: [],
+          createdAt: new Date().toISOString(),
+        }],
+      })),
+
+      completePlanIssue: (planId, issueId) => set((state) => ({
+        plans: state.plans.map((plan) =>
+          plan.id === planId && !plan.completedIssueIds.includes(issueId)
+            ? { ...plan, completedIssueIds: [...plan.completedIssueIds, issueId] }
+            : plan
+        ),
+        issues: state.issues.map((issue) =>
+          issue.id === issueId ? { ...issue, status: 'resolved' as const, updatedAt: new Date().toISOString() } : issue
+        ),
+      })),
+
+      updateScanSchedule: (projectId, updates) => {
+        const state = get();
+        let schedules = state.scanSchedules;
+        if (!schedules.find((s) => s.projectId === projectId)) {
+          schedules = [...schedules, getDefaultScanSchedule(projectId)];
+        }
+        set({
+          scanSchedules: schedules.map((schedule) =>
+            schedule.projectId === projectId ? { ...schedule, ...updates } : schedule
+          ),
+        });
+      },
+    }),
+    {
+      name: STORAGE_KEY,
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        projects: state.projects,
+        scanRecords: state.scanRecords,
+        scanSchedules: state.scanSchedules,
+        issues: state.issues,
+        ruleConfigs: state.ruleConfigs,
+        plans: state.plans,
+      }),
+    }
+  )
+);
