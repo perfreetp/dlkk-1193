@@ -12,6 +12,8 @@ import type {
   ScanResults,
   IssueCategory,
   SeverityLevel,
+  RuleTemplate,
+  PlanMilestone,
 } from '@/types';
 
 const STORAGE_KEY = 'code-quality-center-v1';
@@ -315,16 +317,30 @@ const INITIAL_PLANS: ImprovementPlan[] = [
     id: 'pl1', name: 'Sprint 23 安全加固', description: '修复所有严重依赖漏洞和关键缺陷风险问题', startDate: '2026-06-10', endDate: '2026-06-20', status: 'active',
     issueIds: ['i1', 'i4', 'i6', 'i8', 'i13'], completedIssueIds: [],
     createdAt: '2026-06-09T10:00:00',
+    milestones: [
+      { id: 'm1', name: '第一阶段：依赖升级', description: '升级存在漏洞的第三方依赖', startDate: '2026-06-10', endDate: '2026-06-14', issueIds: ['i4', 'i8'], status: 'active' },
+      { id: 'm2', name: '第二阶段：缺陷修复', description: '修复关键业务逻辑缺陷', startDate: '2026-06-15', endDate: '2026-06-18', issueIds: ['i1', 'i6', 'i13'], status: 'pending' },
+      { id: 'm3', name: '第三阶段：回归验证', description: '全面回归测试和安全审计', startDate: '2026-06-19', endDate: '2026-06-20', issueIds: [], status: 'pending' },
+    ],
   },
   {
     id: 'pl2', name: '技术债务清理 第一阶段', description: '降低 Atlas 和 Horizon 的重复代码率和圈复杂度', startDate: '2026-06-15', endDate: '2026-07-05', status: 'active',
     issueIds: ['i2', 'i3', 'i9', 'i14'], completedIssueIds: [],
     createdAt: '2026-06-12T14:00:00',
+    milestones: [
+      { id: 'm4', name: '重复代码清理', description: '提取公共方法，消除重复代码', startDate: '2026-06-15', endDate: '2026-06-22', issueIds: ['i2', 'i14'], status: 'pending' },
+      { id: 'm5', name: '复杂度优化', description: '重构高复杂度函数，使用设计模式优化', startDate: '2026-06-23', endDate: '2026-07-02', issueIds: ['i3', 'i9'], status: 'pending' },
+      { id: 'm6', name: '代码评审', description: '团队代码评审和最佳实践总结', startDate: '2026-07-03', endDate: '2026-07-05', issueIds: [], status: 'pending' },
+    ],
   },
   {
-    id: 'pl3', name: '测试覆盖率提升', description: '将所有项目核心模块测试覆盖率提升至 80% 以上', startDate: '2026-06-01', endDate: '2026-06-15', status: 'active',
+    id: 'pl3', name: '测试覆盖率提升', description: '将所有项目核心模块测试覆盖率提升至 80% 以上', startDate: '2026-06-01', endDate: '2026-06-15', status: 'overdue',
     issueIds: ['i5', 'i12', 'i15'], completedIssueIds: [],
     createdAt: '2026-05-30T09:00:00',
+    milestones: [
+      { id: 'm7', name: '单元测试补充', description: '为核心模块补充单元测试用例', startDate: '2026-06-01', endDate: '2026-06-08', issueIds: ['i5', 'i15'], status: 'completed' },
+      { id: 'm8', name: '集成测试', description: '补充关键业务流程集成测试', startDate: '2026-06-09', endDate: '2026-06-15', issueIds: ['i12'], status: 'overdue' },
+    ],
   },
 ];
 
@@ -335,6 +351,7 @@ interface PersistedState {
   issues: Issue[];
   ruleConfigs: RuleConfig[];
   plans: ImprovementPlan[];
+  ruleTemplates: RuleTemplate[];
 }
 
 interface AppState extends PersistedState {
@@ -347,11 +364,17 @@ interface AppState extends PersistedState {
   triggerScan: (projectId: string) => void;
   updateIssue: (id: string, updates: Partial<Issue>) => void;
   updateRuleConfig: (projectId: string, checkId: string, updates: Partial<{ enabled: boolean; threshold: number }>) => void;
-  addPlan: (plan: Omit<ImprovementPlan, 'id' | 'createdAt' | 'completedIssueIds'>) => void;
+  addPlan: (plan: Omit<ImprovementPlan, 'id' | 'createdAt' | 'completedIssueIds' | 'milestones'>) => void;
   completePlanIssue: (planId: string, issueId: string) => void;
   updateScanSchedule: (projectId: string, updates: Partial<ScanSchedule>) => void;
   getOrCreateRuleConfig: (projectId: string) => RuleConfig;
   getOrCreateScanSchedule: (projectId: string) => ScanSchedule;
+  saveRuleTemplate: (name: string, description: string, projectId: string, projectName: string) => void;
+  applyRuleTemplate: (templateId: string, targetProjectId: string) => void;
+  deleteRuleTemplate: (templateId: string) => void;
+  addPlanMilestone: (planId: string, milestone: Omit<PlanMilestone, 'id'>) => void;
+  updatePlanMilestone: (planId: string, milestoneId: string, updates: Partial<PlanMilestone>) => void;
+  deletePlanMilestone: (planId: string, milestoneId: string) => void;
 }
 
 const initialState: PersistedState = {
@@ -361,6 +384,7 @@ const initialState: PersistedState = {
   issues: INITIAL_ISSUES,
   ruleConfigs: INITIAL_RULE_CONFIGS,
   plans: INITIAL_PLANS,
+  ruleTemplates: [],
 };
 
 export const useStore = create<AppState>()(
@@ -500,6 +524,7 @@ export const useStore = create<AppState>()(
           id: `pl${Date.now()}`,
           completedIssueIds: [],
           createdAt: new Date().toISOString(),
+          milestones: [],
         }],
       })),
 
@@ -526,6 +551,80 @@ export const useStore = create<AppState>()(
           ),
         });
       },
+
+      saveRuleTemplate: (name, description, projectId, projectName) => {
+        const state = get();
+        const config = state.ruleConfigs.find((c) => c.projectId === projectId);
+        if (!config) return;
+        const template: RuleTemplate = {
+          id: `tpl${Date.now()}`,
+          name,
+          description,
+          checks: JSON.parse(JSON.stringify(config.checks)),
+          createdAt: new Date().toISOString(),
+          sourceProjectId: projectId,
+          sourceProjectName: projectName,
+        };
+        set({ ruleTemplates: [...state.ruleTemplates, template] });
+      },
+
+      applyRuleTemplate: (templateId, targetProjectId) => {
+        const state = get();
+        const template = state.ruleTemplates.find((t) => t.id === templateId);
+        if (!template) return;
+        const existingConfig = state.ruleConfigs.find((c) => c.projectId === targetProjectId);
+        const newChecks = template.checks.map((c) => ({ ...c }));
+        if (existingConfig) {
+          set({
+            ruleConfigs: state.ruleConfigs.map((c) =>
+              c.projectId === targetProjectId ? { ...c, checks: newChecks } : c
+            ),
+          });
+        } else {
+          set({
+            ruleConfigs: [...state.ruleConfigs, { projectId: targetProjectId, checks: newChecks }],
+          });
+        }
+      },
+
+      deleteRuleTemplate: (templateId) => set((state) => ({
+        ruleTemplates: state.ruleTemplates.filter((t) => t.id !== templateId),
+      })),
+
+      addPlanMilestone: (planId, milestone) => set((state) => ({
+        plans: state.plans.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                milestones: [...plan.milestones, { ...milestone, id: `m${Date.now()}` }],
+              }
+            : plan
+        ),
+      })),
+
+      updatePlanMilestone: (planId, milestoneId, updates) => set((state) => ({
+        plans: state.plans.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                milestones: plan.milestones.map((m) =>
+                  m.id === milestoneId ? { ...m, ...updates } : m
+                ),
+              }
+            : plan
+        ),
+      })),
+
+      deletePlanMilestone: (planId, milestoneId) => set((state) => ({
+        plans: state.plans.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                milestones: plan.milestones.filter((m) => m.id !== milestoneId),
+              }
+            : plan
+        ),
+      })),
     }),
     {
       name: STORAGE_KEY,
@@ -537,6 +636,7 @@ export const useStore = create<AppState>()(
         issues: state.issues,
         ruleConfigs: state.ruleConfigs,
         plans: state.plans,
+        ruleTemplates: state.ruleTemplates,
       }),
     }
   )

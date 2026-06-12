@@ -98,7 +98,8 @@ export default function TeamDashboard() {
           {teamRankings.map((member, index) => (
             <div
               key={member.member}
-              className="flex items-center gap-4 bg-surface-900/50 rounded-lg px-4 py-3 hover:bg-surface-700/30 transition-colors"
+              onClick={() => navigate(`/team/${encodeURIComponent(member.member)}`)}
+            className="flex items-center gap-4 bg-surface-900/50 rounded-lg px-4 py-3 hover:bg-surface-700/30 transition-colors cursor-pointer"
             >
               <div className="w-8 text-center font-display font-bold text-surface-400">
                 {index < 3 ? <span className="text-lg">{medalIcons[index]}</span> : <span>{index + 1}</span>}

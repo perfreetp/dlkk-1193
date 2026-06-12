@@ -83,6 +83,27 @@ export interface ImprovementPlan {
   issueIds: string[];
   completedIssueIds: string[];
   createdAt: string;
+  milestones: PlanMilestone[];
+}
+
+export interface PlanMilestone {
+  id: string;
+  name: string;
+  description: string;
+  startDate: string;
+  endDate: string;
+  issueIds: string[];
+  status: 'pending' | 'active' | 'completed' | 'overdue';
+}
+
+export interface RuleTemplate {
+  id: string;
+  name: string;
+  description: string;
+  checks: CheckConfig[];
+  createdAt: string;
+  sourceProjectId: string;
+  sourceProjectName: string;
 }
 
 export interface TeamRanking {

@@ -8,6 +8,7 @@ import Plans from "@/pages/Plans";
 import PlanDetail from "@/pages/PlanDetail";
 import TeamDashboard from "@/pages/TeamDashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
+import TeamMemberDetail from "@/pages/TeamMemberDetail";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/plans" element={<Plans />} />
           <Route path="/plans/:planId" element={<PlanDetail />} />
           <Route path="/dashboard" element={<TeamDashboard />} />
+          <Route path="/team/:memberName" element={<TeamMemberDetail />} />
         </Route>
       </Routes>
     </Router>
